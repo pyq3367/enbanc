@@ -21,6 +21,9 @@ TIMEOUT = 120
 # Only the explicitly authorized project contact address may be public.
 PUBLIC_CONTACT = "pyq3367@zoho.com"
 CONTACT_FILES = {"README.md", "README.zh-CN.md", "docs/005-privacy.md"}
+# Git records the author in the commit object itself, so the authorized
+# address is expected to appear there too.
+CONTACT_CONTEXTS = CONTACT_FILES | {"[历史提交]", "[历史标签]"}
 EMAIL_PATTERN = re.compile(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}")
 PUBLIC_FILES = {"LICENSE", "CHANGELOG.md", "pyproject.toml", ".gitignore",
                 ".sync/publish.py", "SKILL.md", "examples/demo/run.py",
@@ -120,7 +123,7 @@ def scan_bytes(name: str, data: bytes) -> list[str]:
     for no, line in enumerate(text.splitlines(), 1):
         for hit in EMAIL_PATTERN.finditer(line):
             address = hit.group()
-            if address == PUBLIC_CONTACT and name in CONTACT_FILES:
+            if address == PUBLIC_CONTACT and name in CONTACT_CONTEXTS:
                 continue
             if address == PUBLIC_CONTACT and name == ".sync/publish.py" and line.strip() == 'PUBLIC_CONTACT = "' + PUBLIC_CONTACT + '"':
                 continue

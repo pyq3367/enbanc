@@ -20,6 +20,9 @@ def test_public_contact_only_in_approved_locations():
     contact = PUB.PUBLIC_CONTACT
     for name in PUB.CONTACT_FILES:
         assert PUB.scan_bytes(name, contact.encode()) == []
+    # Git records the author in the commit object, so it is expected there.
+    for name in ("[历史提交]", "[历史标签]"):
+        assert PUB.scan_bytes(name, contact.encode()) == []
     assert PUB.scan_bytes("src/enbanc/a.py", contact.encode())
     other = "somebody" + "@" + "gmail" + ".com"
     result = PUB.scan_bytes("README.md", other.encode())
