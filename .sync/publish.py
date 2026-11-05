@@ -77,7 +77,10 @@ def publishable(name: str) -> bool:
         return True
     return ((len(parts) >= 3 and parts[:2] == ("src", "enbanc") and p.suffix == ".py")
             or (len(parts) == 2 and parts[0] == "tests" and p.suffix == ".py")
-            or (len(parts) >= 2 and parts[0] == "docs" and p.suffix == ".md"))
+            or (len(parts) >= 2 and parts[0] == "docs" and p.suffix == ".md")
+            # Repository housekeeping: issue/PR templates, security policy and CI.
+            # Still subject to the same privacy scan as every other file.
+            or (len(parts) >= 2 and parts[0] == ".github" and p.suffix in {".md", ".yml", ".yaml"}))
 
 
 def text_findings(text: str) -> list[tuple[int, str]]:
