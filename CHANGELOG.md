@@ -2,22 +2,11 @@
 
 Format: keep it short. What changed, and why it matters to someone using this.
 
-## Unreleased — local preparation
+## 0.1.0 — 2026-11-05
 
-- Add a self-contained WorkBuddy skill using host models and relative resources;
-  no author gateway, model matrix or credentials are required.
-- Add optional offline environment checks and a minimal skill ZIP export that
-  includes the public instructions, safety rules and MIT license.
-- Apply a positive public-file list, index/history checks and mandatory checks
-  before push; keep sync state and logs local.
-- Limit CLI environment inheritance to system essentials plus explicit settings.
-- Add general safety rules, privacy limits and contribution/contact information.
-- Account-based cloud calls and desktop skill import remain untested here;
-  offline tests are not evidence of model entitlement.
+First public release.
 
-## 0.1.0 — 2026-11-03
-
-First public shape.
+### Workflow
 
 - **Derived state.** Eight states computed from evidence on disk. The stage
   cursor is separate and cannot by itself mark a run delivered.
@@ -35,8 +24,32 @@ First public shape.
 - **Routing.** Findings go back to the task that owns them; unmatched findings
   are surfaced, not guessed.
 
-Known gaps:
+### Packaging
+
+- Self-contained WorkBuddy skill using host models and relative resources; no
+  author gateway, model matrix or credentials are required.
+- Optional offline environment checks, and a minimal skill ZIP export containing
+  the public instructions, safety rules and MIT license.
+- Positive public-file list, index and history checks, and mandatory checks
+  before push; sync state and logs stay local.
+- CLI environment inheritance limited to system essentials plus explicit
+  settings.
+- General safety rules, privacy limits, and contribution and contact
+  information.
+
+### Repository
+
+- Issue and pull-request templates, and a private security reporting path.
+- CI on Python 3.10, 3.12 and 3.13: run the tests, install the package, smoke
+  the console script.
+- The publish gate now admits `.github/` Markdown and workflow files. They go
+  through the same privacy scan as every other file; the allow-list was widened,
+  not bypassed.
+
+### Known gaps
 
 - no cost tracking; that belongs in the provider adapter
 - no render step for visual artifacts; structural checks only
 - one process, no distributed workers
+- account-based cloud calls and desktop skill import are untested here; offline
+  tests are not evidence of model entitlement
