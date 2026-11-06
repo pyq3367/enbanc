@@ -48,6 +48,35 @@ A forced delivery is not a process failure — stopping is a legitimate decision
 It is a distinct outcome, and reports must label it. "Unfinished" and "decided
 not to finish" produce the same artifact and different obligations.
 
+### The delivery record is revocable
+
+`outcome=completed` is not a permanent stamp. Any later review that is not
+`pass` withdraws it: the field is cleared, and `outcome_revoked` records what it
+was, when, and which finding set caused the withdrawal. The reverse also holds —
+if the cursor is already at `P5` and a re-review passes, `completed` is restored.
+
+Without this, one early pass makes the field claim delivery forever while the
+derived state says `needs_human`. Two sources of truth, silently disagreeing, in
+the one place a downstream report is most likely to read.
+
+A `pass` is also allowed to carry open findings (low severity, deferred work).
+That is fine, but it is not silence: `render` appends `, N open` and the
+delivery note must list them.
+
+### A pass is not evidence that anything was produced
+
+A judge sees whatever it is handed. Hand it nothing and it can still answer
+`pass` — the verdict is about the payload, not about the disk. Three audited
+runs reached `P5` with an empty run directory for exactly this reason.
+
+So two checks sit outside the verdict:
+
+- `review()` refuses to run when no artifact exists or every entry is empty.
+  There is nothing to judge, and a verdict on nothing is worse than no verdict.
+- `set_stage("P5")` refuses delivery when no non-empty artifact exists. A run
+  whose deliverable lives outside the run directory is a legitimate case, so
+  `force` with a reason still works — but it has to be a decision, not a default.
+
 ---
 
 ## 3. Report contract

@@ -54,7 +54,7 @@ Run status and task reports are separate. Stages `P0` through `P5` record a posi
 | `needs_human` | Someone needs to intervene, for example after the review chain runs out or the workflow ends without passing |
 | `idle` | None of the states above currently applies |
 
-Entering `P5` normally requires a passed review. If you decide to stop instead, `--force --reason "..."` records why. The result is kept as `outcome=stopped_by_user`, not counted as a completed, passed run.
+Entering `P5` normally requires a passed review. If you decide to stop instead, `--force --reason "..."` records why. The result is kept as `outcome=stopped_by_user`, not counted as a completed, passed run. A recorded delivery can also be withdrawn: if a later review comes back `revise`, the completed marker is cleared and the reason is kept, so the field and the derived state never disagree about whether the work shipped.
 
 If repeated reviews aren't helping the work converge, you can change reviewers. The reference implementation uses `enbanc escalate` to record progress through a review chain and asks for human intervention when the chain runs out. It does not guarantee that the next model is stronger or switch model requests just from the list; the integration layer has to configure which model is actually called.
 

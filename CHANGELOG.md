@@ -2,6 +2,29 @@
 
 Format: keep it short. What changed, and why it matters to someone using this.
 
+## 0.1.1 — 2026-11-06
+
+Two fixes for state that described itself incorrectly. Both came out of
+auditing real runs, not out of reading the code.
+
+### Fixed
+
+- **The delivery record is revocable.** A run that passed early and then came
+  back `revise` kept `outcome=completed` forever — the field said delivered, the
+  derived state said `needs_human`, and anything reading the field believed the
+  run was finished. A non-passing review now clears the record and writes
+  `outcome_revoked` with the reason; a re-review that passes while the cursor is
+  already at `P5` restores it.
+- **A pass with open findings is labelled.** `render` appends `, N open` when
+  the final verdict is `pass` but findings remain, and `stage --set P5` prints
+  them. Low-severity deferred work is allowed; being quiet about it is not.
+  `docs/reference/rules.md` §2 documents both rules.
+- **Nothing to review is refused.** A review with an empty or missing artifact
+  set used to return `pass` — the judge was answering an empty payload. Three
+  audited runs reached delivery with an empty directory that way. `review()` now
+  raises before calling a judge, and `set_stage("P5")` refuses delivery when no
+  non-empty artifact exists (force still works, with a reason).
+
 ## 0.1.0 — 2026-11-05
 
 First public release.

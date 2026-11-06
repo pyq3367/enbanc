@@ -367,6 +367,24 @@ class Run:
         delivered = newest(subs)
         return delivered > reviewed
 
+    def artifacts_present(self) -> bool:
+        """Is there at least one non-empty artifact on disk for this run?
+
+        A passed review is not evidence that anything was produced — the
+        judge can be handed an empty payload. Delivery checks the disk.
+        """
+        for task in (self.state.get("tasks") or {}).values():
+            rel = task.get("artifact")
+            if not rel:
+                continue
+            p = self.dir / rel
+            try:
+                if p.is_file() and p.stat().st_size > 0:
+                    return True
+            except OSError:
+                continue
+        return False
+
     # -- stage gate ----------------------------------------------------------
     def set_stage(self, target: str, force: bool = False, reason: str = "") -> None:
         if target not in STAGES:
@@ -381,6 +399,11 @@ class Run:
                 )
             if not self.is_passed() and not reason.strip():
                 raise ValueError("forcing delivery requires --reason: 'unfinished' and 'decided not to' are different things")
+            if not self.artifacts_present() and not force:
+                raise PermissionError(
+                    "refusing to mark delivered: no artifact exists on disk. "
+                    "Produce the deliverable, or force with a reason if there is none."
+                )
 
         def mut(st: dict) -> dict:
             st["stage"] = target
@@ -461,7 +484,12 @@ class Run:
         last = self.last_review()
         tail = ""
         if last:
-            tail = f" | review r{last.get('round','?')} {last.get('verdict','?')} ({len(last.get('issues') or [])} findings)"
+            n = len(last.get("issues") or [])
+            tail = f" | review r{last.get('round','?')} {last.get('verdict','?')} ({n} findings)"
+            if last.get("verdict") == "pass" and n:
+                # "pass (3 findings)" reads like zero problems. Say it plainly:
+                # a pass can still leave items the delivery note must cover.
+                tail += f", {n} open"
         esc = len(st.get("escalations") or [])
         return "[%s] %s | cursor %s | %s%s%s" % (
             self.run_id,

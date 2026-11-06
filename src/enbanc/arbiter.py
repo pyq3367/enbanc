@@ -79,6 +79,17 @@ def review(run: Run, entries: list[tuple[str, Path]], factory: ProviderFactory,
     criteria = criteria or []
     findings: list[Finding] = []
 
+    # Reviewing nothing is how a run reaches delivery with an empty directory.
+    # An empty or missing artifact set is refused before a judge is ever called.
+    present = [(tid, p) for tid, p in entries if Path(p).is_file()
+               and Path(p).stat().st_size > 0]
+    if not present:
+        raise ValueError(
+            "nothing to review: no artifact exists (%d entries, all missing or empty). "
+            "Produce the deliverable first, or point the review at a real file."
+            % len(entries))
+    entries = present
+
     for task_id, path in entries:
         task = (run.state.get("tasks") or {}).get(task_id) or {}
         name = task.get("verifier") or task.get("kind") or "document"
@@ -133,6 +144,23 @@ def review(run: Run, entries: list[tuple[str, Path]], factory: ProviderFactory,
     def mut(st: dict) -> dict:
         st.setdefault("reviews", []).append(record)
         st["rounds"] = max(int(st.get("rounds", 0)), round_no)
+        # A review that withdraws the evidence for delivery must withdraw the
+        # delivery record too. Without this, `outcome=completed` sticks forever
+        # after one early pass, and every report that reads the field claims a
+        # finished run while the derived state says otherwise.
+        if final != "pass" and st.get("outcome") == "completed":
+            st["outcome"] = ""
+            st["outcome_revoked"] = {
+                "from": "completed",
+                "at": record["at"],
+                "reason": f"round {round_no} verdict={final} ({len(merged)} findings)",
+            }
+        elif final == "pass" and st.get("stage") == "P5" and not st.get("outcome"):
+            # Reverse case: the cursor is already at delivery and the work just
+            # passed re-review. Restore the record instead of leaving a hole.
+            st["outcome"] = "completed"
+            st["outcome_at"] = record["at"]
+            st.pop("outcome_revoked", None)
         return st
 
     run.update(mut)

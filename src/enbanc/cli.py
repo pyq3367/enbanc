@@ -79,6 +79,11 @@ def cmd_stage(a):
     print(run.render())
     if run.state.get("outcome") == "stopped_by_user":
         print(f"⚠ delivered as stopped_by_user: {run.state.get('outcome_reason')}")
+    if a.set == "P5" and run.is_passed():
+        last = run.last_review() or {}
+        open_items = len(last.get("issues") or [])
+        if open_items:
+            print(f"⚠ pass with {open_items} open finding(s) — list them in the delivery note")
     return 0
 
 

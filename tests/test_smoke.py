@@ -94,6 +94,84 @@ def test_derived_state_never_calls_a_failed_run_delivered(tmp_path):
     assert run.derive() == "needs_human"
 
 
+def test_review_refuses_when_there_is_nothing_to_review(tmp_path):
+    """A judge handed an empty payload approves nothing.
+
+    Real case: three runs reached delivery with an empty directory. The review
+    had been given no artifact at all, and the pass was recorded anyway.
+    """
+    run = Run.init("empty", "produce a report", tmp_path)
+    with raises(ValueError, match="nothing to review"):
+        review(run, [], lambda role: MockProvider(seed=role), default_verifiers(), [])
+
+    missing = tmp_path / "never-written.md"
+    with raises(ValueError, match="nothing to review"):
+        review(run, [("w", missing)], lambda role: MockProvider(seed=role), default_verifiers(), [])
+
+
+def test_delivery_is_refused_when_no_artifact_exists(tmp_path):
+    run = Run.init("nofile", "produce a report", tmp_path)
+    run.update(lambda st: {**st, "reviews": [{"round": 1, "verdict": "pass", "issues": []}]})
+    with raises(PermissionError, match="no artifact exists"):
+        run.set_stage("P5")
+    run.set_stage("P5", force=True, reason="report lives outside the run directory")
+    final = Run.load("nofile", tmp_path).state
+    assert final["stage"] == "P5" and final["outcome"] == "completed"
+
+
+def test_a_failing_review_revokes_an_earlier_delivery(tmp_path):
+    """outcome=completed must not survive a later revise.
+
+    Real case: a run passed at round 3, entered P5, then rounds 4 and 5 came
+    back revise. state.json still said completed, so every consumer of the
+    field reported a delivered run that the derived state called needs_human.
+    """
+    run = Run.init("revoke", "produce a report", tmp_path)
+    dispatch(run, [Task(id="w", prompt="produce a report", kind="doc", out="a.md")],
+             lambda role: MockProvider(quality=1.0, seed=role))
+    run = Run.load("revoke", tmp_path)
+    art = run.dir / run.state["tasks"]["w"]["artifact"]
+
+    class AlwaysPass:
+        name = "always-pass"
+
+        def complete(self, prompt, system="", timeout=900):
+            from enbanc.providers.base import Reply
+            return Reply(text='{"verdict":"pass","issues":[]}')
+
+    review(run, [("w", art)], lambda role: AlwaysPass(), default_verifiers(), [])
+    run = Run.load("revoke", tmp_path)
+    run.set_stage("P5")
+    assert run.state["outcome"] == "completed"
+
+    class AlwaysRevise:
+        name = "always-revise"
+
+        def complete(self, prompt, system="", timeout=900):
+            from enbanc.providers.base import Reply
+            return Reply(text='{"verdict":"revise","issues":[{"type":"logic","where":"a.md",'
+                              '"detail":"section 2 does not match the data","severity":"low",'
+                              '"evidence":"table 1"}]}')
+
+    rec = review(Run.load("revoke", tmp_path), [("w", art)],
+                 lambda role: AlwaysRevise(), default_verifiers(), [])
+    assert rec["verdict"] == "revise"
+
+    st = Run.load("revoke", tmp_path).state
+    assert st["outcome"] == ""
+    assert st["outcome_revoked"]["from"] == "completed"
+
+
+def test_render_flags_a_pass_that_still_has_findings(tmp_path):
+    run = Run.init("open", "x", tmp_path)
+    run.update(lambda st: {**st, "reviews": [{
+        "round": 1, "verdict": "pass",
+        "issues": [{"type": "format", "where": "a.md", "detail": "d",
+                    "severity": "low", "evidence": "e"}]}]})
+    # "pass (1 findings)" reads like zero problems; the run must say otherwise
+    assert "1 open" in Run.load("open", tmp_path).render()
+
+
 # -- verifiers ---------------------------------------------------------------
 
 def test_placeholder_is_a_high_finding(tmp_path):
