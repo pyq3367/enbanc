@@ -72,13 +72,17 @@ def cmd_collect(a):
 def cmd_stage(a):
     run = Run.load(a.run_id, _root(a))
     try:
-        run.set_stage(a.set, force=a.force, reason=a.reason or "")
+        run.set_stage(a.set, force=a.force, reason=a.reason or "",
+                      accept_residual=bool(getattr(a, "accept_residual", False)))
     except (PermissionError, ValueError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 1
     print(run.render())
     if run.state.get("outcome") == "stopped_by_user":
         print(f"⚠ delivered as stopped_by_user: {run.state.get('outcome_reason')}")
+    if run.state.get("outcome") == "accepted_with_residual":
+        print("⚠ delivered with %d accepted finding(s) — list them in the delivery note"
+              % len(run.state.get("outcome_residual") or []))
     if a.set == "P5" and run.is_passed():
         last = run.last_review() or {}
         open_items = len(last.get("issues") or [])
@@ -201,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--set", required=True)
     p.add_argument("--force", action="store_true")
     p.add_argument("--reason", default="")
+    p.add_argument("--accept-residual", action="store_true", dest="accept_residual",
+                   help="allow delivery when the last verdict is conditional_pass")
 
     p = add("queue", cmd_queue)
     p.add_argument("--run-id", required=True)

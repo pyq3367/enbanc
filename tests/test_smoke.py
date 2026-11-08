@@ -270,3 +270,51 @@ def test_deny_list_blocks(tmp_path):
     res = Mandate(Run.load("m2", tmp_path)).check(["src/a.py", "config.lock", "other.txt"])
     paths = {v["path"] for v in res["violations"]}
     assert paths == {"config.lock", "other.txt"}
+
+
+# -- three outcomes ----------------------------------------------------------
+
+class _PassWithFinding:
+    """Judge says pass but leaves one finding — the historical false-pass shape."""
+
+    name = "pass-with-finding"
+
+    def complete(self, prompt, system="", timeout=900):
+        from enbanc.providers.base import Reply
+        return Reply(text='{"verdict":"pass","issues":[{"type":"format","where":"a.md:3",'
+                          '"detail":"unit mixes GB and GiB","severity":"low",'
+                          '"evidence":"a.md:3 GB/GiB"}]}')
+
+
+def _run_with_artifact(tmp_path, name="three"):
+    run = Run.init(name, "produce a report", tmp_path)
+    dispatch(run, [Task(id="w", prompt="produce a report", kind="doc", out="a.md")],
+             lambda role: MockProvider(quality=1.0, seed=role))
+    run = Run.load(name, tmp_path)
+    art = run.dir / run.state["tasks"]["w"]["artifact"]
+    return run, art
+
+
+def test_pass_with_findings_becomes_conditional(tmp_path):
+    run, art = _run_with_artifact(tmp_path, "cond")
+    rec = review(run, [("w", art)], lambda role: _PassWithFinding(), default_verifiers(), [])
+    assert rec["verdict"] == "conditional_pass", rec["verdict"]
+
+
+def test_conditional_delivery_needs_explicit_acceptance(tmp_path):
+    run, art = _run_with_artifact(tmp_path, "cond2")
+    review(run, [("w", art)], lambda role: _PassWithFinding(), default_verifiers(), [])
+    run = Run.load("cond2", tmp_path)
+    with raises(PermissionError, match="conditional_pass"):
+        run.set_stage("P5")
+    run = Run.load("cond2", tmp_path)
+    run.set_stage("P5", accept_residual=True)
+    st = Run.load("cond2", tmp_path).state
+    assert st["outcome"] == "accepted_with_residual", st["outcome"]
+    assert len(st["outcome_residual"]) == 1
+
+
+def test_conditional_never_reads_as_idle(tmp_path):
+    run, art = _run_with_artifact(tmp_path, "cond3")
+    review(run, [("w", art)], lambda role: _PassWithFinding(), default_verifiers(), [])
+    assert Run.load("cond3", tmp_path).derive() == "needs_human"

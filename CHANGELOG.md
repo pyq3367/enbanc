@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.0 — 2026-11-08
+
+A pass with open findings is no longer a pass. Three outcomes, three exits.
+
+### Added
+
+- **`conditional_pass` is its own verdict.** A judge that returns `pass` while
+  still listing findings used to be recorded as a pass; the delivery gate only
+  read the verdict, so runs shipped with known defects and the report said
+  "passed". Now `pass` + findings normalises to `conditional_pass`, and
+  `stage --set P5` refuses unless the caller passes `--accept-residual`.
+  Accepted runs record `outcome=accepted_with_residual` plus the residual
+  findings, so "shipped with known defects" is countable after the fact.
+- **Derived state treats it as `needs_human`**, not `idle` — fixing or
+  accepting is a person's decision, not the orchestrator's.
+
+### Why
+
+Two real runs (`p2-closeout`, `rack-pdu`) passed with one or two open findings
+and were reported as delivered. The information was in `review-rN.json` the
+whole time; nothing read it at the gate.
+
+### Tests
+
+3 new smoke tests pin the outcome: `pass` + finding becomes `conditional_pass`,
+delivery is refused without explicit acceptance, and the accepted run records
+its residual. 62/62 pass with `python tests/run.py`.
+
 Format: keep it short. What changed, and why it matters to someone using this.
 
 ## 0.1.1 — 2026-11-06

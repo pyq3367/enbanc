@@ -313,6 +313,10 @@ class Run:
             return True
         return (self.state.get("vote") or {}).get("final") == "pass"
 
+    def is_conditional(self) -> bool:
+        last = self.last_review() or {}
+        return last.get("verdict") == "conditional_pass"
+
     # -- derived stage -------------------------------------------------------
     def derive(self) -> str:
         st = self.state
@@ -337,6 +341,10 @@ class Run:
             return "working"
         if self._unreviewed():
             return "review"
+        # conditional_pass: shippable but with findings. Neither pass nor revise —
+        # a person has to decide, so it must not read as "idle".
+        if self.is_conditional():
+            return "needs_human"
         return "idle"
 
     @staticmethod
@@ -386,18 +394,26 @@ class Run:
         return False
 
     # -- stage gate ----------------------------------------------------------
-    def set_stage(self, target: str, force: bool = False, reason: str = "") -> None:
+    def set_stage(self, target: str, force: bool = False, reason: str = "",
+                  accept_residual: bool = False) -> None:
         if target not in STAGES:
             raise ValueError(f"stage must be one of {STAGES}")
         if target == "P5":
-            if not self.is_passed() and not force:
+            if self.is_conditional() and not accept_residual and not force:
+                last = self.last_review() or {}
+                raise PermissionError(
+                    "refusing to mark delivered: last verdict=conditional_pass with %d open "
+                    "finding(s). Fix them, or accept them explicitly (--accept-residual)."
+                    % len(last.get("issues") or [])
+                )
+            if not self.is_passed() and not self.is_conditional() and not force:
                 last = self.last_review() or {}
                 raise PermissionError(
                     "refusing to mark delivered: last verdict=%s (%d open findings). "
                     "Pass review, escalate, or force with a reason."
                     % (last.get("verdict", "none"), len(last.get("issues") or []))
                 )
-            if not self.is_passed() and not reason.strip():
+            if not self.is_passed() and not self.is_conditional() and not reason.strip():
                 raise ValueError("forcing delivery requires --reason: 'unfinished' and 'decided not to' are different things")
             if not self.artifacts_present() and not force:
                 raise PermissionError(
@@ -408,8 +424,18 @@ class Run:
         def mut(st: dict) -> dict:
             st["stage"] = target
             if target == "P5":
-                st["outcome"] = "completed" if self.is_passed() else "stopped_by_user"
-                if st["outcome"] != "completed":
+                if self.is_passed():
+                    st["outcome"] = "completed"
+                elif self.is_conditional() and accept_residual:
+                    # Accepted with findings: not completed (it did not pass),
+                    # not stopped_by_user (nobody halted it). Keep it separable
+                    # so the rate of "shipped with known defects" is countable.
+                    st["outcome"] = "accepted_with_residual"
+                    st["outcome_residual"] = (self.last_review() or {}).get("issues") or []
+                    st["outcome_reason"] = "user accepted %d open finding(s)" % len(st["outcome_residual"])
+                    st["outcome_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                else:
+                    st["outcome"] = "stopped_by_user"
                     st["outcome_reason"] = reason.strip()
                     st["outcome_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             return st

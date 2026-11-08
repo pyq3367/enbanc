@@ -126,6 +126,15 @@ def review(run: Run, entries: list[tuple[str, Path]], factory: ProviderFactory,
     final = verdict["verdict"]
     if hard and final == "pass":
         final = "revise"
+    # A pass with open findings is not a pass. Three outcomes, three exits:
+    #   pass              nothing open
+    #   conditional_pass  judge says shippable, but findings remain — a person
+    #                     must accept them explicitly before delivery
+    #   revise            a hard finding, or the judge refused
+    # Collapsing the middle case into pass is how runs reached P5 with known
+    # defects while the report said "passed".
+    if final == "pass" and merged:
+        final = "conditional_pass"
 
     record = {
         "round": round_no,
