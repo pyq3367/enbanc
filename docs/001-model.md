@@ -53,16 +53,18 @@ supports it.
 
 ## Outcome
 
-Three values, and the difference matters:
+Four values, and the difference matters:
 
 | Outcome | Means | Obligation |
 |---|---|---|
-| `completed` | passed review | none |
+| `completed` | passed review, nothing open | none |
+| `accepted_with_residual` | the last verdict was `conditional_pass` and a person accepted the open findings | report must list them; the list stays in `outcome_residual` |
 | `stopped_by_user` | a person decided to ship it anyway | report must lead with the open findings |
 | `abandoned` | the requirement changed, this run is void | keep the artifacts, drop the conclusions |
 
-Collapsing these three into "done" is how a run that was never reviewed gets
-quoted six months later as if it had been.
+Collapsing these four into "done" is how a run that was never reviewed gets
+quoted six months later as if it had been. `accepted_with_residual` exists so
+that "we shipped knowing about N findings" is a query, not a memory.
 
 ## Idempotency
 

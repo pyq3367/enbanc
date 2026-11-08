@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — 2026-11-08
+## 0.1.3 — 2026-11-08
 
 A pass with open findings is no longer a pass. Three outcomes, three exits.
 
@@ -21,6 +21,17 @@ A pass with open findings is no longer a pass. Three outcomes, three exits.
 Two real runs (`p2-closeout`, `rack-pdu`) passed with one or two open findings
 and were reported as delivered. The information was in `review-rN.json` the
 whole time; nothing read it at the gate.
+
+### Documentation
+
+- The READMEs were rewritten around what the tool does, where it fits, and how
+  it works, instead of why it was started. The "Why I made it" section is gone;
+  "What it can do" replaces it, and the author page now describes how the
+  implementation was actually assembled.
+- `docs/reference/rules.md`, `docs/001-model.md` and `docs/003-operations.md`
+  now describe the three verdicts and the `accepted_with_residual` outcome.
+  `docs/000-why.md` keeps the original audit but points at the current rules.
+- Both READMEs are 178 lines and share the same section order, tables and links.
 
 ### Tests
 

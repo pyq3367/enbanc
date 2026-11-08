@@ -59,9 +59,26 @@ Without this, one early pass makes the field claim delivery forever while the
 derived state says `needs_human`. Two sources of truth, silently disagreeing, in
 the one place a downstream report is most likely to read.
 
-A `pass` is also allowed to carry open findings (low severity, deferred work).
-That is fine, but it is not silence: `render` appends `, N open` and the
-delivery note must list them.
+### Three verdicts, not two
+
+`pass` means nothing is open. `revise` means a high-severity finding, or the
+judge refused. Between them sits `conditional_pass`: the judge thinks the work
+can ship but has left findings open. It is not a pass, and it does not become
+one by being written next to the word `pass`.
+
+The normalisation is mechanical, so the caller cannot skip it:
+
+- any `high` finding (verifier or judge) forces `revise`
+- `pass` with a non-empty finding list becomes `conditional_pass`
+
+`set_stage("P5")` refuses a `conditional_pass` run unless the caller passes
+`--accept-residual`. Accepting writes `outcome=accepted_with_residual` and keeps
+the finding list in `outcome_residual`, so "shipped with known defects" stays
+countable instead of dissolving into a plain pass.
+
+Why the middle state exists at all: two audited runs reached `P5` with one or
+two findings open and a report that said "passed". The information was in
+`review-r<N>.json` the whole time; the gate simply read the verdict and stopped.
 
 ### A pass is not evidence that anything was produced
 
@@ -76,6 +93,9 @@ So two checks sit outside the verdict:
 - `set_stage("P5")` refuses delivery when no non-empty artifact exists. A run
   whose deliverable lives outside the run directory is a legitimate case, so
   `force` with a reason still works — but it has to be a decision, not a default.
+- Delivery also refuses when a task is still `failed`, `timeout`, `unverified`,
+  or carries an unanswered blocking question. A passing verdict on the artifacts
+  says nothing about the task that never delivered.
 
 ---
 

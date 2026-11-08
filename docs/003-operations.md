@@ -31,7 +31,17 @@ enbanc --root runs render --run-id r1
 enbanc --root runs stage --run-id r1 --set P5
 ```
 
-`pass` 允许正常收尾；`revise` 时先处理实际问题。产物、任务输出与评审记录保存在 `runs/`，只用于本机，不进入公开版本。
+判定有三态，出口各不相同：
+
+| 末轮判定 | 能否收尾 | 说明 |
+|---|---|---|
+| `pass` | 可以 | 无未闭合项 |
+| `conditional_pass` | 需显式接受 | 加 `--accept-residual` 才放行，记录 `outcome=accepted_with_residual` 与残留项清单 |
+| `revise` | 不可以 | 先处理实际问题；确要停止则 `--force --reason "..."`，记为 `outcome=stopped_by_user` |
+
+`conditional_pass` 不是一个可以忽略的中间态。它的意思是「可以交，但还有问题」，所以必须由人说过「这些我接受」，而不是让报告直接写「已通过」。
+
+产物、任务输出与评审记录保存在 `runs/`，只用于本机，不进入公开版本。
 
 真实模型接入使用用户自己的 CLI 或 provider。通用 CLI 模板需要正确传入任务 `{prompt}` 和评审 `{system}`，并按实际 CLI 返回格式解析。默认只继承少量基础环境变量；凭据和代理变量只能在用户明确批准后通过适配器 `env` 传入，不能硬编码或输出。凭据存储、登录、文件权限与 Office 工具由宿主负责；不要把命令替换视为完整适配。
 
