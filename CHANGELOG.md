@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.1.4 — 2026-11-10
+
+A sub-agent that inherits the main model is indistinguishable from the main
+session afterwards. Say which model you dispatched, and say it when you do.
+
+### Added
+
+- **Every dispatch declares its model, and every dispatch is reported back.**
+  A sub-agent without an explicit model usually inherits the main session's
+  model — same model, same rate — so afterwards the usage statistics cannot
+  tell a genuine fan-out from a single session talking to itself. `P1` now
+  requires an explicit model per sub-agent, a stated fallback ("inherits the
+  main model") when the host cannot choose one, and an immediate receipt table
+  with one row per dispatch: index, sub-agent, model, work title, expected
+  output.
+- **A receipt that does not match reality counts as a failure**, and is
+  reported in the delivery summary.
+- **Self-review by the main model is not independent review.** When the
+  reviewer shares the main model's family, the run may only claim
+  "same-model independent context check" — never cross-model verification.
+
+### Why
+
+A user reading token usage concluded no sub-agents had been dispatched at all.
+Nothing was broken in the accounting: the sub-agents were running on the main
+model precisely because no model was named, which is exactly what makes them
+invisible. The fix is disclosure at dispatch time, not better bookkeeping
+afterwards.
+
 ## 0.1.3 — 2026-11-08
 
 A pass with open findings is no longer a pass. Three outcomes, three exits.
