@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .arbiter import escalate, review
 from .dispatch import Task, dispatch
+from .inspect import DEFAULT_STALL_MIN, DEFAULT_THIN_TOKENS, inspect_root
 from .mandate import Mandate
 from .providers import CliProvider, MockProvider
 from .route import route
@@ -73,11 +74,18 @@ def cmd_stage(a):
     run = Run.load(a.run_id, _root(a))
     try:
         run.set_stage(a.set, force=a.force, reason=a.reason or "",
-                      accept_residual=bool(getattr(a, "accept_residual", False)))
+                      accept_residual=bool(getattr(a, "accept_residual", False)),
+                      allow_solo=bool(getattr(a, "allow_solo", False)))
     except (PermissionError, ValueError) as e:
         print(f"refused: {e}", file=sys.stderr)
         return 1
     print(run.render())
+    if run.state.get("solo_waiver"):
+        w = run.state["solo_waiver"]
+        print(f"⚠ single-handed run waived at {w.get('stage')}: {w.get('reason')} "
+              "— list it as a degraded path in the delivery note")
+    if run.state.get("force_skip_quantity_gate"):
+        print("⚠ quantity gate forced past — recorded in force_skip_quantity_gate")
     if run.state.get("outcome") == "stopped_by_user":
         print(f"⚠ delivered as stopped_by_user: {run.state.get('outcome_reason')}")
     if run.state.get("outcome") == "accepted_with_residual":
@@ -125,7 +133,9 @@ def cmd_review(a):
         print("no artifacts to review; run dispatch first", file=sys.stderr)
         return 1
     criteria = run.state.get("criteria") or []
-    record = review(run, entries, _factory(a), default_verifiers(), criteria, a.round)
+    record = review(run, entries, _factory(a), default_verifiers(), criteria, a.round,
+                    min_review_tokens=getattr(a, "min_review_tokens", 120),
+                    require_usage=bool(getattr(a, "require_usage", False)))
     print(f"round {record['round']}: {record['verdict']} ({len(record['issues'])} findings)")
     for i in record["issues"]:
         print(f"  [{i['severity']}/{i['type']}] {i['where']}: {i['detail'][:90]}")
@@ -168,6 +178,22 @@ def cmd_route(a):
     return 0 if not res["unrouted"] else 2
 
 
+def cmd_inspect(a):
+    root = _root(a)
+    try:
+        findings = inspect_root(root, a.stall_min, a.thin_tokens)
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 2
+    if not findings:
+        print("inspect: no findings")
+        return 0
+    for f in findings:
+        print(f"  {f['run']:<28} {f['code']:<13} {f['detail']}")
+    print(f"inspect: {len(findings)} finding(s); read-only, nothing was changed")
+    return 10
+
+
 def cmd_doctor(a):
     from .doctor import run_offline
 
@@ -207,6 +233,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reason", default="")
     p.add_argument("--accept-residual", action="store_true", dest="accept_residual",
                    help="allow delivery when the last verdict is conditional_pass")
+    p.add_argument("--allow-solo", action="store_true", dest="allow_solo",
+                   help="waive the two-task requirement; --reason is mandatory")
+
+    p = add("inspect", cmd_inspect,
+            help="read-only sweep of every run: no_state, stalled, zero_sub, thin_review, zombie")
+    p.add_argument("--stall-min", type=float, default=DEFAULT_STALL_MIN,
+                   help="minutes parked at P0/P1 before a run counts as stalled")
+    p.add_argument("--thin-tokens", type=int, default=DEFAULT_THIN_TOKENS,
+                   help="completion-token floor below which a verdict is a stamp")
 
     p = add("queue", cmd_queue)
     p.add_argument("--run-id", required=True)
@@ -221,11 +256,16 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.choices["dispatch"]
     p.add_argument("--tasks", required=True)
-    p.add_argument("--max-parallel", type=int, default=2)
+    p.add_argument("--max-parallel", type=int, default=3)
     p.add_argument("--force", action="store_true")
     p.add_argument("--resume", action="store_true")
 
-    sub.choices["review"].add_argument("--round", type=int)
+    p = sub.choices["review"]
+    p.add_argument("--round", type=int)
+    p.add_argument("--min-review-tokens", type=int, default=120, dest="min_review_tokens",
+                   help="a verdict below this many completion tokens is not a review")
+    p.add_argument("--require-usage", action="store_true", dest="require_usage",
+                   help="treat a judge that reports no usage as an insufficient review")
 
     p = add("escalate", cmd_escalate)
     p.add_argument("--run-id", required=True)

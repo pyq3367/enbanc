@@ -26,8 +26,14 @@ class MockProvider:
     def complete(self, prompt: str, system: str = "", timeout: int = 900) -> Reply:
         role = self._role(system or prompt)
         if role == "judge":
-            return Reply(text=self._verdict(prompt))
-        return Reply(text=self._artifact(prompt))
+            # A real judge spends a few hundred tokens on a verdict. The stub
+            # reports a nominal figure so the thin-review gate is not tripped by
+            # the mock itself; a test that wants a thin review brings its own
+            # judge and its own usage.
+            return Reply(text=self._verdict(prompt),
+                         meta={"usage": {"completion_tokens": 240}})
+        text = self._artifact(prompt)
+        return Reply(text=text, meta={"usage": {"completion_tokens": max(1, len(text) // 4)}})
 
     @staticmethod
     def _role(text: str) -> str:

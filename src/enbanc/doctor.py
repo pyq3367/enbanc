@@ -66,7 +66,9 @@ def mock_smoke() -> bool:
     record = review(run, [("writer", artifact)], factory, default_verifiers(), [])
     if record["verdict"] != "pass":
         return False
-    run.set_stage("P5")
+    # The offline smoke run is deliberately single-handed, and the quantity gate
+    # wants that said out loud rather than assumed.
+    run.set_stage("P5", allow_solo=True, reason="offline smoke: one producer, one judge")
     return Run.load("smoke", root).state["outcome"] == "completed"
 
 

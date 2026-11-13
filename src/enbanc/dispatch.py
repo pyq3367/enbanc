@@ -1,17 +1,21 @@
 """Dispatch: hand tasks to providers, keep the ledger honest.
 
-Three rules that exist because their absence produced real failures:
+Four rules that exist because their absence produced real failures:
 
 1. An artifact is written to disk before its status is recorded. Status is
    derived from the artifact, not the other way round.
 2. A task that produced text but no ready report is `unverified`, not `done`.
 3. Re-dispatching the same (run, task, requirement, round) is a no-op. Re-running
    by hand is how a bug turns into a bill.
+4. Tasks that write disjoint paths may run at the same time; tasks whose write
+   sets overlap run one after another. Parallelism is derived from what each
+   task declares it touches, never from how many tasks were queued.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +39,10 @@ class Task:
     criteria: list[str] = field(default_factory=list)
     role: str = "producer"
     cwd: str = "."
+    # Declared write set, relative to `cwd`. Empty means "just the output file".
+    # Naming every path a task writes is what lets independent work run in
+    # parallel instead of being serialised out of caution.
+    writes: list[str] = field(default_factory=list)
 
     def artifact_path(self, run: Run) -> Path:
         return run.dir / "sub" / self.id / self.out
@@ -43,20 +51,87 @@ class Task:
 DEFAULT_OUT = {"doc": "artifact.md", "page": "index.html", "deck": "deck.md", "code": "solution.py"}
 
 
+def _normalise(cwd: str, item: str) -> str:
+    """One comparable form for a path: absolute-ish, forward slashes, lower case.
+
+    Case is folded because a Windows and a POSIX view of the same tree must not
+    disagree about whether two tasks collide on `Report.md`.
+    """
+    joined = item if os.path.isabs(item) else os.path.join(cwd or ".", item)
+    return os.path.normpath(joined).replace("\\", "/").lower()
+
+
+def write_paths(task: Task) -> list[str]:
+    """The paths a task claims. A declared set wins; otherwise it is its output."""
+    declared = task.writes or [task.out or DEFAULT_OUT.get(task.kind, "artifact.md")]
+    return [_normalise(task.cwd, item) for item in declared]
+
+
+def overlaps(a: str, b: str) -> bool:
+    """Paths collide when equal, or when one is a directory containing the other."""
+    if a == b:
+        return True
+    return b.startswith(a.rstrip("/") + "/") or a.startswith(b.rstrip("/") + "/")
+
+
+def plan_groups(tasks: list[Task]) -> list[list[str]]:
+    """Split tasks into groups that must not run concurrently.
+
+    Each group is a connected component of the "our write sets overlap" graph.
+    Within a group the order is the order given; between groups everything is
+    free to run at once. This is what turns "five tasks" into "three workers and
+    a queue" without a person guessing which pairs are safe.
+    """
+    ids = [t.id for t in tasks]
+    paths = {t.id: write_paths(t) for t in tasks}
+    parent = {i: i for i in ids}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            if any(overlaps(x, y) for x in paths[a] for y in paths[b]):
+                union(a, b)
+
+    grouped: dict[str, list[str]] = {}
+    for tid in ids:
+        grouped.setdefault(find(tid), []).append(tid)
+    return list(grouped.values())
+
+
 def _isolate(tasks: list[Task]) -> None:
-    """Two workers writing the same file is silent corruption, so refuse it."""
-    seen: dict[str, str] = {}
-    for t in tasks:
-        key = str(Path(t.cwd) / t.out).lower()
-        if key in seen:
-            raise ValueError(
-                f"tasks {seen[key]!r} and {t.id!r} both write {t.out!r} in the same directory; "
-                "give each task its own output file or working directory"
-            )
-        seen[key] = t.id
+    """Two workers writing the same file is silent corruption, so refuse it.
+
+    A declared write set is the exception: those tasks are scheduled against
+    each other by `plan_groups` and run one after another. Undeclared work has
+    no such guarantee, so it is rejected before anything starts.
+    """
+    for i, a in enumerate(tasks):
+        if a.writes:
+            continue
+        for b in tasks[i + 1:]:
+            if b.writes:
+                continue
+            key = str(Path(a.cwd) / (a.out or DEFAULT_OUT.get(a.kind, "artifact.md"))).lower()
+            key_b = str(Path(b.cwd) / (b.out or DEFAULT_OUT.get(b.kind, "artifact.md"))).lower()
+            if key == key_b:
+                raise ValueError(
+                    f"tasks {a.id!r} and {b.id!r} both write {a.out!r} in the same directory; "
+                    "give each task its own output file or working directory, or declare "
+                    "'writes' if you really mean them to share a path in turn"
+                )
 
 
-def dispatch(run: Run, tasks: list[Task], factory: ProviderFactory, max_parallel: int = 2,
+def dispatch(run: Run, tasks: list[Task], factory: ProviderFactory, max_parallel: int = 3,
              force: bool = False, resume: bool = False) -> list[dict]:
     _isolate(tasks)
 
@@ -132,12 +207,21 @@ def dispatch(run: Run, tasks: list[Task], factory: ProviderFactory, max_parallel
 
         record(t, status, elapsed=elapsed, artifact=str(out_path.relative_to(run.dir)),
                report=report, error=reply.error)
+        item = {"id": t.id, "status": status, "elapsed": elapsed,
+                "artifact": str(out_path), "report": report}
         with lock:
-            results.append({"id": t.id, "status": status, "elapsed": elapsed,
-                            "artifact": str(out_path), "report": report})
-        return results[-1]
+            results.append(item)
+        return item
+
+    # Serial inside a group, parallel between groups. The partition comes from
+    # the declared write sets, so nobody has to eyeball which tasks are safe to
+    # run together.
+    by_id = {t.id: t for t in plan}
+
+    def run_group(group: list[str]) -> list[dict]:
+        return [work(by_id[tid]) for tid in group]
 
     with ThreadPoolExecutor(max_workers=max(1, max_parallel)) as pool:
-        list(pool.map(work, plan))
+        list(pool.map(run_group, plan_groups(plan)))
 
     return results

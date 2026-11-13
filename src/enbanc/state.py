@@ -32,6 +32,12 @@ DERIVED = ("delivered", "ready", "needs_human", "blocked", "stalled", "working",
 
 TERMINAL = ("done", "degraded", "failed", "timeout", "unverified")
 
+# Stages that imply work has been divided. A run that reaches one of these with
+# fewer than two tasks is a single session wearing every hat, which is the shape
+# of every "nobody noticed it was never reviewed" incident.
+SOLO_GATED = ("P2", "P3", "P4", "P5")
+MIN_TASKS = 2
+
 
 def atomic_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,6 +345,10 @@ class Run:
             return "stalled"
         if any(t.get("status") == "running" and not self._stale(t) for t in tasks.values()):
             return "working"
+        # A verdict that arrived in a few dozen tokens did not review anything,
+        # so the run still needs a review rather than sitting idle.
+        if (self.last_review() or {}).get("verdict") == "insufficient_review":
+            return "review"
         if self._unreviewed():
             return "review"
         # conditional_pass: shippable but with findings. Neither pass nor revise —
@@ -395,7 +405,7 @@ class Run:
 
     # -- stage gate ----------------------------------------------------------
     def set_stage(self, target: str, force: bool = False, reason: str = "",
-                  accept_residual: bool = False) -> None:
+                  accept_residual: bool = False, allow_solo: bool = False) -> None:
         if target not in STAGES:
             raise ValueError(f"stage must be one of {STAGES}")
         if target == "P5":
@@ -421,8 +431,42 @@ class Run:
                     "Produce the deliverable, or force with a reason if there is none."
                 )
 
+        # Quantity gate. Splitting the work is what makes an independent look
+        # possible; one task means the producer and the reviewer are the same
+        # session. Waiving is allowed, silently waiving is not.
+        task_count = len(self.state.get("tasks") or {})
+        solo_waiver: dict | None = None
+        skip_gate = False
+        if target in SOLO_GATED and task_count < MIN_TASKS:
+            if force:
+                skip_gate = target == "P5"
+            elif allow_solo:
+                why = reason.strip()
+                if not why:
+                    raise ValueError(
+                        "--allow-solo requires --reason: an unexplained single-handed run is "
+                        "exactly the failure this gate exists to catch"
+                    )
+                solo_waiver = {"reason": why, "stage": target,
+                               "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            else:
+                raise PermissionError(
+                    "refusing to enter %s with %d task(s): work that was never divided "
+                    "never received an independent look. Dispatch at least %d tasks, or "
+                    "waive explicitly (--allow-solo --reason)."
+                    % (target, task_count, MIN_TASKS)
+                )
+
         def mut(st: dict) -> dict:
             st["stage"] = target
+            if solo_waiver:
+                st.setdefault("solo_waivers", []).append(solo_waiver)
+                st["solo_waiver"] = solo_waiver
+            if skip_gate:
+                # Forcing past the gate is a decision; it stays countable.
+                st.setdefault("force_skip_quantity_gate", []).append(
+                    {"stage": target, "tasks": task_count, "reason": reason.strip(),
+                     "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
             if target == "P5":
                 if self.is_passed():
                     st["outcome"] = "completed"
@@ -517,12 +561,14 @@ class Run:
                 # a pass can still leave items the delivery note must cover.
                 tail += f", {n} open"
         esc = len(st.get("escalations") or [])
-        return "[%s] %s | cursor %s | %s%s%s" % (
+        solo = " | solo-waiver" if st.get("solo_waiver") else ""
+        return "[%s] %s | cursor %s | %s%s%s%s" % (
             self.run_id,
             self.derive(),
             st.get("stage", "?"),
             "/".join(parts),
             f" | escalations {esc}" if esc else "",
+            solo,
             tail,
         )
 

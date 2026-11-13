@@ -97,6 +97,17 @@ So two checks sit outside the verdict:
   or carries an unanswered blocking question. A passing verdict on the artifacts
   says nothing about the task that never delivered.
 
+### The quantity gate sits before delivery
+
+Delivery additionally requires that work was actually split: entering `P5`
+— and every stage from `P2` on — with fewer than two dispatched tasks is
+refused (§9). The refusal names the waiver on its way out:
+
+```
+stage refused: quantity gate — 1 task dispatched (< 2)
+solo runs need --allow-solo --reason "<why one worker suffices>"
+```
+
 ---
 
 ## 3. Report contract
@@ -181,6 +192,8 @@ A mandate bounds what a run may touch.
 | verification command times out | `high` severity, never a pass |
 | judge returns unparseable output | retry once, then record `unavailable`; never assume `pass` |
 | two tasks write the same path | refuse the dispatch before starting anything |
+| review usage below threshold with a passing verdict | verdict becomes `insufficient_review`, treated as not passed (§10) |
+| fewer than two tasks dispatched | refuse the stage transition; a waiver needs an explicit reason (§9) |
 | process gone, artifact absent | `failed` |
 | process gone, artifact present | re-derive from the artifact, then `done` or `unverified` |
 
@@ -195,3 +208,89 @@ about being finished.
 When it is not worth it: single-turn tasks, work you will read yourself
 immediately, anything cheap to redo. The gate earns its cost when a wrong "done"
 is expensive — a shipped deck, a published page, a decision someone acts on.
+
+---
+
+## 9. The quantity gate and the solo waiver
+
+Split work, or say why you did not. A run entering `P2`, `P3`, `P4` or `P5`
+with fewer than two dispatched tasks is refused by default: work that was
+never divided cannot have been read by anyone else, so "reviewed" would be
+a claim without a witness.
+
+The refusal is waivable, never silent:
+
+| Exit | What it costs | What it records |
+|---|---|---|
+| `--allow-solo --reason "<...>"` | the reason must be stated | `state.solo_waiver`; the delivery summary surfaces it in the degradation section |
+| `--force` | crosses the gate without a waiver | `force_skip_quantity_gate`, countable after the fact |
+
+Forcing is a recorded decision, not a hidden pass. Anything that crossed a
+gate can later be counted from disk.
+
+---
+
+## 10. Review usage
+
+A verdict has a cost, and the cost is evidence. The code reads the
+reviewer's reported `completion_tokens`: below a threshold (default 120)
+and with a verdict of `pass` or `conditional_pass`, the verdict is
+rewritten to `insufficient_review` and handled as a failure — it cannot
+reach `P5`.
+
+| Reviewer reported | Verdict | Outcome |
+|---|---|---|
+| usage ≥ threshold | `pass` / `conditional_pass` | stands; normal rules apply |
+| usage < threshold | `pass` / `conditional_pass` | rewritten to `insufficient_review`, treated as failed |
+| no usage reported | any | marked unverified usage, not an offence |
+| no usage reported, `--require-usage` | any | treated as failed |
+
+Whether usage is reported at all is the provider's decision, so absence is
+not guilt: without evidence the run marks the review unverified rather than
+asserting laziness. Only an explicit `--require-usage` from the caller
+turns a missing report into a failure.
+
+---
+
+## 11. Write-set parallelism
+
+Parallelism is derived from declarations, not judged by hand. A task may
+declare the paths it writes (`writes`); the scheduler groups tasks by
+conflict:
+
+| Relationship between write sets | Scheduling |
+|---|---|
+| disjoint | different groups, run in parallel |
+| overlapping (same file, or one path inside the other's directory) | same group, serial |
+| not declared, same output file | refused before dispatch |
+
+The third row keeps the second honest: serial execution prevents races
+between declared writers, but two undeclared tasks aiming at one file are
+a collision the scheduler refuses outright rather than serialise into an
+overwrite. What can run in parallel follows from what was declared.
+
+---
+
+## 12. The external inspector
+
+The main session is not a reliable monitor: it is compacted, interrupted,
+and displaced by the next task. The inspector is a separate read-only pass
+— it runs once, reads the state once, prints, and exits. It modifies
+nothing.
+
+It alarms with exit code `10` when any of these hold. The first five are
+findings about a run; the sixth is the inspector's own fallback, so a broken
+state file is reported instead of silently disappearing from the sweep:
+
+| Code | Condition |
+|---|---|
+| `no_state` | a requirement file exists but no state file |
+| `stalled` | the cursor has sat at `P0`/`P1` past the stall threshold |
+| `zero_sub` | the cursor is past `P2` yet no task was ever dispatched, unless a waiver is recorded |
+| `thin_review` | any review round reported usage below the threshold |
+| `zombie` | a task is marked `running` past 1.5× its own timeout |
+| `bad_state` | the state file cannot be read; one broken run does not affect the others |
+
+Exit codes: `0` — nothing found; `10` — at least one alarm; `2` — the
+inspector itself could not run. It runs at three fixed points: after
+decomposition, before delivery, and once a day.

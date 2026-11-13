@@ -34,6 +34,11 @@ Schema:
 
 MAX_PAYLOAD = 24_000
 
+# A verdict that arrives in a handful of tokens is a stamp, not a review. The
+# threshold is deliberately low: it catches "pass" delivered in one line, not
+# terse-but-real findings lists.
+THIN_REVIEW_TOKENS = 120
+
 
 def _read(p: Path, limit: int = 8_000) -> str:
     try:
@@ -74,7 +79,9 @@ def _parse_verdict(text: str) -> dict | None:
 
 def review(run: Run, entries: list[tuple[str, Path]], factory: ProviderFactory,
            verifiers: dict, criteria: list[str] | None = None,
-           round_no: int | None = None) -> dict:
+           round_no: int | None = None,
+           min_review_tokens: int = THIN_REVIEW_TOKENS,
+           require_usage: bool = False) -> dict:
     round_no = round_no or (int(run.state.get("rounds", 0)) + 1)
     criteria = criteria or []
     findings: list[Finding] = []
@@ -136,11 +143,32 @@ def review(run: Run, entries: list[tuple[str, Path]], factory: ProviderFactory,
     if final == "pass" and merged:
         final = "conditional_pass"
 
+    # A pass bought with a one-line answer is not a review. Usage is only
+    # trusted when the provider reports it: a provider that reports nothing
+    # cannot be accused of laziness, so silence is recorded rather than
+    # punished -- unless the caller explicitly demands usage.
+    meta = getattr(reply, "meta", None) or {}
+    usage = meta.get("usage") if isinstance(meta, dict) else None
+    tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+    thin_reason = ""
+    if isinstance(tokens, int) and not isinstance(tokens, bool):
+        if tokens < int(min_review_tokens):
+            thin_reason = (f"judge answered in {tokens} completion tokens, below the "
+                           f"{int(min_review_tokens)} needed for a real review")
+    elif require_usage:
+        thin_reason = "judge reported no completion_tokens and usage was required"
+    if thin_reason and final in ("pass", "conditional_pass"):
+        final = "insufficient_review"
+        merged.append({"type": "review", "where": "judge reply", "detail": thin_reason,
+                       "severity": "high", "evidence": "usage.completion_tokens",
+                       "source": "usage"})
+
     record = {
         "round": round_no,
         "judge": getattr(judge, "name", "judge"),
         "verdict": final,
         "issues": merged,
+        "usage": {"completion_tokens": tokens} if isinstance(tokens, int) else {"completion_tokens": None},
         "counts": {
             "mechanical": len(findings),
             "high": sum(1 for i in merged if i["severity"] == "high"),

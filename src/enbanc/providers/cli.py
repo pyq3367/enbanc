@@ -51,14 +51,24 @@ class CliProvider:
             return Reply(text="", ok=False, error=f"command not found: {argv[0]}")
 
         out = proc.stdout or ""
+        meta: dict = {"exit": proc.returncode}
         if self.extract:
-            out = self._extract(out) or out
+            envelope = self._envelope(out)
+            if envelope:
+                value = envelope.get(self.extract)
+                if isinstance(value, str):
+                    out = value
+                # Usage, when the CLI prints it, is what lets a thin review be
+                # told apart from a real one. Read it rather than drop it.
+                usage = envelope.get("usage")
+                tokens = usage.get("completion_tokens") if isinstance(usage, dict) else None
+                if isinstance(tokens, int) and not isinstance(tokens, bool):
+                    meta["usage"] = {"completion_tokens": tokens}
         if proc.returncode != 0 and not out.strip():
             return Reply(text="", ok=False, error=(proc.stderr or f"exit {proc.returncode}")[:400])
-        return Reply(text=out, ok=proc.returncode == 0, meta={"exit": proc.returncode})
+        return Reply(text=out, ok=proc.returncode == 0, meta=meta)
 
-    def _extract(self, text: str) -> str | None:
-        """Pull a field out of a JSON envelope, if the CLI prints one."""
+    def _envelope(self, text: str) -> dict | None:
         start = text.find("{")
         end = text.rfind("}")
         if start < 0 or end <= start:
@@ -66,6 +76,13 @@ class CliProvider:
         try:
             obj = json.loads(text[start : end + 1])
         except json.JSONDecodeError:
+            return None
+        return obj if isinstance(obj, dict) else None
+
+    def _extract(self, text: str) -> str | None:
+        """Pull a field out of a JSON envelope, if the CLI prints one."""
+        obj = self._envelope(text)
+        if not obj:
             return None
         val = obj.get(self.extract)
         return val if isinstance(val, str) else None

@@ -77,7 +77,13 @@ def scenario(run_id: str, quality: float) -> None:
 
     banner(f"{run_id}: try to deliver")
     try:
-        run.set_stage("P5")
+        # Single-artifact demo: one producer, and the judge is a separate call.
+        # Production work should be split into at least two tasks so the
+        # reviewer reads something it did not write; waiving that here is
+        # recorded on the run rather than skipped silently.
+        run.set_stage("P5", allow_solo=True,
+                      reason="single-artifact demo: the judge is a separate call, "
+                             "so there is no second task to split off")
         print("  delivered:", run.state.get("outcome"))
     except (PermissionError, ValueError) as e:
         print(f"  refused: {e}")

@@ -28,8 +28,13 @@ enbanc --root runs dispatch --run-id r1 --tasks tasks.json --provider mock
 enbanc --root runs collect --run-id r1
 enbanc --root runs review --run-id r1 --provider mock
 enbanc --root runs render --run-id r1
-enbanc --root runs stage --run-id r1 --set P5
+enbanc --root runs stage --run-id r1 --set P5 --allow-solo --reason "single-artifact example"
+enbanc --root runs inspect
 ```
+
+`inspect` 只读巡检 `runs/` 下的全部 run，发现异常时退出码为 10，不改任何状态。
+
+进入 `P2` 之后的阶段时，任务少于两条会被拒绝：工作从未拆开，就没人独立看过它。确实只有一条任务时用 `--allow-solo --reason "<原因>"` 显式豁免，理由会留在记录里，也应写进交付说明的降级栏。上面的示例只有一个产出方，所以带了豁免参数。
 
 判定有三态，出口各不相同：
 

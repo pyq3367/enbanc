@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.2.0 — 2026-11-13
+
+Four gates against the ways a run fakes progress: work that was never split,
+a review that cost a few tokens, parallelism nobody derived, and a run
+nobody watched.
+
+### Added
+
+- **A quantity gate with a solo waiver.** Entering `P2`–`P5` with fewer than
+  two dispatched tasks is refused by default: work that was never divided
+  cannot have been seen by anyone else. The waiver is explicit —
+  `--allow-solo --reason "<why one worker suffices>"` — recorded in
+  `state.solo_waiver` and surfaced in the delivery summary's degradation
+  section. `--force` still crosses the gate, but writes
+  `force_skip_quantity_gate` as it does, so forcing is countable, never
+  silent.
+- **A review-usage gate.** A reviewer that spends a handful of tokens to
+  answer `pass` has not reviewed anything. When the reviewer reports
+  `completion_tokens` below a threshold (default 120) and the verdict is
+  `pass` or `conditional_pass`, the verdict is rewritten to
+  `insufficient_review` and treated as a failure — it cannot reach `P5`.
+  Whether usage is reported at all is the provider's decision, so a missing
+  report is not an offence by default; only an explicit `--require-usage`
+  turns absence into failure. Without evidence the run marks the review
+  unverified rather than asserting laziness.
+- **Write-set parallelism.** Tasks may declare the paths they write
+  (`writes`). The scheduler groups by conflict: disjoint write sets run in
+  parallel; overlapping ones — the same file, or one path inside the
+  other's directory — share a group and run serially. Two tasks with no
+  declared write set that target the same output file are refused before
+  dispatch: serial is not a licence to overwrite.
+- **An external inspector.** The main session is not a trustworthy monitor:
+  it gets compacted, interrupted, and displaced by the next task. The
+  inspector is a separate read-only pass — run once, read once, print,
+  exit — and changes no state. It alarms with exit code 10 on `no_state`,
+  `stalled`, `zero_sub`, `thin_review`, `zombie` or `bad_state`, and runs
+  at three fixed points: after decomposition, before delivery, and once a
+  day.
+
+### Why
+
+All four close the same failure shape: a run reporting progress nobody
+verified. Work that was never split cannot have been independently seen; a
+review that cost a handful of tokens is a stamp, not a check; parallelism
+decided by hand collides silently; and a run left unwatched drifts while
+the session that owned it moves on. Each gate turns one of these into
+something countable on disk instead of something assumed.
+
 ## 0.1.4 — 2026-11-10
 
 A sub-agent that inherits the main model is indistinguishable from the main

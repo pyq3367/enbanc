@@ -180,7 +180,12 @@ class PortableTests(unittest.TestCase):
         self.assertIn("delivered: completed", output)
         _, output = self.capture(demo.scenario, "demo-fail", 0.3)
         self.assertIn("refused:", output)
-        self.assertEqual(Run.load("demo-pass", demo.ROOT).state["outcome"], "completed")
+        delivered = Run.load("demo-pass", demo.ROOT).state
+        self.assertEqual(delivered["outcome"], "completed")
+        # The demo is a single-artifact run, so delivery goes through the
+        # recorded waiver; a silent pass would be the bug this gate exists for.
+        self.assertEqual(delivered["solo_waiver"]["stage"], "P5")
+        self.assertTrue(delivered["solo_waiver"]["reason"].strip())
         self.assertNotEqual(Run.load("demo-fail", demo.ROOT).state["outcome"], "completed")
         self.assertTrue(demo.ROOT.resolve().is_relative_to(self.tmp))
 
