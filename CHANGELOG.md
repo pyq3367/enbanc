@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.1 — 2026-11-13
+
+The primary README is now written in Chinese, with English kept as a
+switchable translation, and the release gate points the same way.
+
+### Changed
+
+- **`README.md` is Chinese; `README.en.md` is the translation.** GitHub shows
+  the primary file, so the repository opens in the language the project is
+  written in. The line under the title switches between the two, and the parity
+  check reads in that direction as well: every mechanism label in the Chinese
+  text must appear in the English one.
+- **The contact address is allowed in the translated README.** The privacy
+  allow-list named the old file; a translation that cannot carry the public
+  contact would have to drop it silently.
+- **The quick-start block no longer trips the quantity gate unannounced.** The
+  demo closes a single-producer run at `P5`, which the gate added in 0.2.0
+  refuses; the command now carries the waiver and the prose says why.
+
+### Why
+
+A repository whose main text is a translation reads like documentation written
+for someone else. The gate had to move with it: a parity check that only looks
+for English literals inside Chinese text stops meaning anything once the two
+swap places.
+
 ## 0.2.0 — 2026-11-13
 
 Four gates against the ways a run fakes progress: work that was never split,

@@ -44,7 +44,7 @@ def temp_git(root, *args):
 
 
 def test_privacy_public_paths_and_self_scan(tmp_path):
-    names = ["README", "README.md", "README.zh-CN.md", "LICENSE", "CHANGELOG.md",
+    names = ["README", "README.md", "README.en.md", "LICENSE", "CHANGELOG.md",
              "pyproject.toml", ".gitignore", ".sync/publish.py", "SKILL.md",
              "src/enbanc/a.py", "src/enbanc/providers/a.py", "tests/a.py",
              "docs/a.md", "docs/reference/a.md", "examples/demo/run.py", "examples/safety-rules.md"]
@@ -362,8 +362,8 @@ def test_privacy_tracked_ignored_public_file(tmp_path):
 
 def test_privacy_readme_parity_preserved(tmp_path):
     put(tmp_path, "README.md", "## 模型\n`delivered`\n")
-    put(tmp_path, "README.zh-CN.md", "## 模型\n`delivered`\n")
+    put(tmp_path, "README.en.md", "## Model\n`delivered`\n")
     with patch.object(PUB, "REPO", tmp_path):
         assert PUB.readme_parity() == []
-        put(tmp_path, "README.zh-CN.md", "## 模型\n## 多余\n")
+        put(tmp_path, "README.en.md", "## Model\n## Extra\n")
         assert PUB.readme_parity()

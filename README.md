@@ -1,50 +1,50 @@
 # enbanc
 
-A multi-model collaboration and review skill for documents, slide decks, websites, and other work.
+用于文档、PPT、网页等工作的多模型协作与评审技能。
 
-[English](README.md) | 简体中文
+[English](README.en.md) | 简体中文
 
-When I use AI to make things, I often run into this problem: the model says it has finished, but I open the file and still find omissions. Asking it to check again sometimes fixes them, and sometimes it just says there are no problems. On a longer task, especially after changing models or sessions, it also becomes easy to lose track of what has and has not been done.
+我用 AI 做东西时，经常遇到一种情况：模型说已经完成，打开文件却还能看到遗漏。再让它检查一遍，有时能改掉，有时又会说没有问题。如果任务比较长，中间换过模型或会话，哪些做了、哪些没做，也容易混在一起。
 
-enbanc splits a task among different producers, arranges a separate review, takes the findings back for changes, and keeps a record of each run. The name comes from the legal term *en banc*, which means a hearing with all the judges taking part. Here it means several people reviewing work together. It does not involve legal services.
+enbanc 把任务拆开交给不同的产出方，另安排评审，把发现的问题带回去修改，并留下每次运行的记录。名字来自法律术语 *en banc*，指由全体法官参与审理。在这里取的是多人共同审议的意思，不涉及法律服务。
 
-## What it can do
+## 它能做什么
 
-This workflow suits deliverables that need repeated checking. Examples include long reports divided into chapters, research that combines several sources, presentations with more than a dozen slides, websites with multiple pages or interactions, and code changes with clear acceptance requirements. Keeping task and review records is more useful when the work spans multiple files, needs several producers, or may move between models and sessions.
+这套流程适合需要反复核对的交付物。比如分章节的长报告、要综合多份材料的调研、十几页以上的 PPT、包含多个页面或交互的网页，以及有明确验收要求的代码改动。任务跨多个文件、需要多位产出方协作，或者中途可能换模型和会话时，保留任务与评审记录更有用。
 
-A simple question, a short piece of copy, or a task that only needs a first draft usually does not justify the full workflow. Without a clear deliverable and acceptance requirements, more review rounds may not help either. Presentations, websites, and formatted documents still need to be opened or rendered and checked. It cannot replace that step.
+简单问答、一段短文案、只要一份初稿的任务，通常不值得走完整流程。没有明确交付物和验收要求时，多跑几轮评审也不一定有帮助。PPT、网页和排版文档最终仍要打开或渲染后检查，它不能代替这一步。
 
-What it actually does:
+它实际做的事如下：
 
-- Splits the requirements into tasks and records each task's producer, output location, and execution state.
-- Configures `producer` and `judge` separately. Production and review can use different models, or independent contexts with the same model. These two cases are clearly distinguished.
-- Requires producers to submit structured reports covering the completed scope, evidence, and anything a person needs to decide. A single "finished" does not count as normal completion.
-- Runs verifiers suitable for the task first, then records the programmatic results together with the model review.
-- Uses three review verdicts: `pass` / `conditional_pass` / `revise`. `pass` means it passed. `conditional_pass` means it passed with conditions that still need confirmation. `revise` sends the findings back for changes, after which the output is collected and reviewed again.
-- Does not allow a run to close as normally completed when review has not passed. Stopping early by user decision, exhausting the review chain, and ending the workflow without passing all leave different records.
-- Saves the requirements, task states, outputs, reviews, and stage changes. If new problems appear later, a recorded completion can be withdrawn.
+- 把需求拆成任务，记录每个任务的产出方、输出位置和执行状态。
+- 分开配置 `producer` 和 `judge`。产出与评审可以使用不同模型，也可以在同一模型下使用独立上下文，但两种情况会明确区分。
+- 要求产出方提交结构化报告，写明完成范围、证据和需要人决定的事项。只有一句“完成了”不算正常完成。
+- 先运行适合任务的验证器，再把程序检查结果和模型评审意见合并记录。
+- 评审使用判定三态 `pass` / `conditional_pass` / `revise`。`pass` 是通过，`conditional_pass` 是附条件通过，条件仍需确认；`revise` 会把问题带回修改，之后再收集输出并评审。
+- 评审未通过时，不允许按正常完成收尾。用户决定提前停止、评审链用尽，或流程结束时仍未通过，都会留下不同记录。
+- 保存需求、任务状态、输出、评审和阶段变化。之后发现新问题，可以撤回已经记下的完成状态。
 
-It has two entry points. One is a host skill that can be imported into WorkBuddy and uses the host's existing account models and tools. The other is the Python reference implementation in this repository, which can run offline examples or connect to your own model commands or adapters.
+它提供两种入口。一种是可以导入 WorkBuddy 的宿主技能，使用宿主已有的账户模型和工具。另一种是仓库里的 Python 参考实现，可以离线试跑，也可以接入自己的模型命令或适配器。
 
-## About the author and the implementation
+## 关于作者和实现
 
-I'm not a professional programmer. enbanc is a general-purpose skill I gradually built around my own needs while using AI. Most of the code was also generated with model assistance.
+我不是职业程序员。enbanc 是我在实际使用 AI 的过程中，按自己的需求逐步做出来的通用技能，代码也主要由模型辅助生成。
 
-During development, I try the requirements with different models and ask other models to check the results. Some models handle the implementation, while others check it or suggest another approach. I keep adjusting things based on how they work in use. The main implementation of this skill came from that repeated cross-checking and revision.
+开发时，我会把需求放到不同模型里尝试，再让其他模型核对结果。有的模型负责实现，有的用来检查或提出另一种做法，我根据实际使用情况继续调整。这套技能的主要实现，就是这样交叉使用、反复修改积累下来的。
 
-The project started with my own reviews of several cases where a model said the work was finished, but something was missing when I opened the file. The fixes ended up in the script's decision conditions, rather than staying as a line in a document saying "check before delivery." A run cannot close as normally completed without passing review, and tasks without an explicit completion report are marked separately.
+项目起源于我自己几次“说完成了、打开却缺东西”的复盘。改法最后落进了脚本的判定条件里，而不是留在文档里写一句“交付前要检查”：没有通过评审就不能按正常完成收尾，没有明确完成报告的任务会单独标出来。
 
-One thing needs to be clear: a failed review does not necessarily mean the work has a problem. Sometimes the acceptance criteria need changing, or the review itself made the wrong judgment.
+需要说明的是，评审没有通过不等于作品有问题，有时要改的是验收标准，或者评审本身判断错了。
 
-Offline examples, automated tests, and pre-release checks can now verify the basic workflow. The examples cover both a normal pass and a result with placeholders that cannot be delivered normally. The tests also check the staged-content and history release gates. They use a mock provider and verify state transitions, file records, and release checks. They do not demonstrate the output quality of real models.
+现在可以用离线示例、自动化测试和发布前检查验证基本流程。示例覆盖正常通过与存在占位符而无法正常交付两种情况，测试还会检查暂存与历史发布门禁。它们使用 mock provider，验证的是状态流转、文件记录和发布检查，不代表真实模型的产出质量。
 
-I still call it a reference implementation. Its verifiers are fairly basic, model adapters need to be configured by the person connecting them, and it has no complete Office file generation and editing toolchain. You still need to verify how it behaves with real accounts, host tools, and different tasks. I suggest starting with one small task whose scope is clear.
+我仍然把它称为参考实现。它的验证器比较基础，模型适配需要接入者自己配置，也没有完整的 Office 文件生成与编辑工具链。真实账户、宿主工具和不同任务下的表现，还需要使用者自己验证。建议先拿一项范围清楚的小任务跑一遍。
 
-## How a run works
+## 一次任务怎么进行
 
-Before starting, make clear what needs to be done, what must be delivered, and what must not be changed. Tasks can go to several producers, with a reviewer assigned separately. Run programmatic checks first where possible, then give the rest to model review. When problems are found, take them back for changes, then collect and check the output again.
+开始前，先把要做什么、最后要交什么、哪些地方不能改说清楚。任务可以分给多个产出方，评审方单独安排。能用程序检查的内容先检查，剩下的再交给模型评审。发现问题就带着问题修改，修改后重新收集并核对。
 
-The run keeps the requirements, task states, outputs, and review records. Producers need to provide a structured report saying what they completed, where the evidence is, and whether anything needs a human decision. For example:
+执行过程中会保留需求、任务状态、输出和评审记录。产出方需要给出结构化报告，说明完成了什么、证据在哪里，以及有没有需要人决定的事项。例如：
 
 ```json
 {"state": "ready", "ready": true,
@@ -53,65 +53,70 @@ The run keeps the requirements, task states, outputs, and review records. Produc
  "evidence": ["report.md:12"]}
 ```
 
-A task that returns only text without a valid report is marked `unverified`. It is not treated as normally completed just because it says "finished." The report is still a claim made by a model and does not replace checking the file contents.
+只返回文字、没有有效报告的任务，会记为 `unverified`，不会仅凭一句“完成了”就算作正常完成。报告本身仍是模型的声明，不能代替对文件内容的检查。
 
-Run status and task reports are two separate layers of information. Stages `P0` through `P5` record the position in the workflow. When showing progress, the script also derives the current status from the review records, task states, and output files:
+运行状态和任务报告是两层信息。阶段 `P0` 到 `P5` 用来记录流程位置；查看进度时，脚本还会根据评审记录、任务状态和输出文件推算当前状态：
 
-| State | What it means |
+| 状态 | 表示什么 |
 |---|---|
-| `working` | A task is running |
-| `stalled` | A task is still recorded as running but has exceeded the timeout threshold and needs checking |
-| `blocked` | A task failed or timed out |
-| `review` | New task output is waiting for review |
-| `ready` | Review passed, but the run has not been closed |
-| `delivered` | Review passed and the run entered the delivery stage |
-| `needs_human` | Someone needs to intervene, for example after the review chain runs out or the workflow ends without passing |
-| `idle` | None of the states above currently applies |
+| `working` | 有任务正在执行 |
+| `stalled` | 任务仍记为运行中，但超过了超时阈值，需要检查 |
+| `blocked` | 有任务失败或超时 |
+| `review` | 有新的任务输出等待评审 |
+| `ready` | 评审已经通过，尚未收尾 |
+| `delivered` | 评审通过，并已进入交付阶段 |
+| `needs_human` | 需要人工处理，例如评审链用尽或未通过却结束了流程 |
+| `idle` | 当前没有匹配到上述状态 |
 
-Entering `P5` normally requires a passed review. If you decide to stop there, use `--force --reason "..."` to explain why. The record keeps `outcome=stopped_by_user` and does not count it as completion after passing. A recorded completion can also be withdrawn. If a later review returns `revise`, the completion marker is cleared and the reason is kept. The field and the derived status will not give two different answers about whether the work was delivered.
+正常进入 `P5` 需要通过评审。如果决定到此为止，可以用 `--force --reason "..."` 说明原因，记录会保留 `outcome=stopped_by_user`，不把它算成通过后的完成。已经记下的完成也可以被撤回：之后某轮评审判 `revise`，完成标记会被清掉并留下原因，字段与派生状态不会对“到底交没交”给出两种答案。
 
-If repeated reviews are not converging, you can change reviewers. The current reference implementation uses `enbanc escalate` to record progress through the review chain and leaves the decision to a person when the chain runs out. It does not automatically guarantee that the next model is stronger, or switch model requests based only on a list. The integration layer must configure which model is actually called.
+遇到评审反复不收敛的情况，可以换一位评审者。当前参考实现用 `enbanc escalate` 记录评审链的推进，链用尽后交给人决定。它不会自动保证下一位模型更强，也不会仅凭名单就切换模型请求，实际调用哪个模型需要由接入层配置。
 
-A run also records four things about its own honesty. Entering the production, review, escalation or delivery stage with fewer than two tasks is refused unless you waive it explicitly with `--allow-solo --reason`, and the waiver stays on the record. A review whose reported usage falls below the threshold is marked `insufficient_review` rather than `pass` — a one-line approval reviewed nothing — while a provider that reports no usage is only flagged, not failed. Tasks that declare the paths they write (`writes`) run in parallel when those sets do not overlap and one after another when they do; two undeclared tasks aiming at the same file are refused before anything starts. And `inspect` sweeps every run without changing a thing, reporting a run that never dispatched a task, a review too thin to count, or a task recorded as running long after its process is gone, and exits 10 when it finds one.
+一个 run 还会记录四件关于自身诚实度的事：
 
-Findings from programmatic checks and model review are recorded together. A verifier finding marked `high` prevents that round from passing, and the model cannot directly delete those records. Verifiers can also make mistakes, especially with approximate rules such as character counts. Confirm that a verifier suits your task before using it.
+- 任务少于两条就进入产出、评审、升级或交付阶段会被拒绝，除非用 `--allow-solo --reason` 显式豁免，豁免留在记录里。
+- 评审上报的用量低于阈值时记为 `insufficient_review` 而不是 `pass`：一句话的批准什么也没审。提供方完全不上报用量时只作标注，不判失败。
+- 声明了写入路径（`writes`）的任务，写集不相交就并行、重叠就串行；两个都没声明写集却指向同一文件的任务，在开工前直接拒绝。
+- `inspect` 只读巡检全部 run，报出从未派过任务、评审太短不算数、标着运行中但进程早已不在这类情况，发现即退出 10。
 
-## Using it in WorkBuddy
+程序检查和模型评审的发现会合并记录。验证器标为 `high` 的问题会阻止该轮通过，模型不能直接把这些记录删掉。但验证器也会误判，尤其是字数之类的近似规则，使用前要确认它适合你的任务。
 
-After downloading, you can import `SKILL.md` and `references/safety-rules.md` from the repository into WorkBuddy using the skill package structure, or ask an authorized host to install this public skill. Once enabled, enter `/enbanc` or "合议：", then describe your workspace, delivery format, and acceptance requirements. You can also run `python .sync/publish.py export-skill` first to generate an importable ZIP. This packages the files locally and does not upload anything.
+## 在 WorkBuddy 中使用
 
-This mode uses the host's existing account models and tools. It does not require my gateway, API key, model matrix, or any local directories. `default`, `lite`, and `reasoning` are resolved according to the host's actual configuration and do not guarantee three different models. If your account has only one available model, you can do independent-context review, but it will be clearly labeled and not described as cross-model verification. Whether you can access a specific model depends on what your account can actually call.
+下载后，可将仓库里的 `SKILL.md` 与 `references/safety-rules.md` 按技能包结构导入 WorkBuddy，或让已授权的宿主安装这份公开技能。启用后输入 `/enbanc` 或“合议：”，说明你自己的工作区、交付格式与验收要求。也可以先运行 `python .sync/publish.py export-skill` 生成可导入的 ZIP；这是本机打包，不会上传。
 
-I suggest giving each task a short set of general rules: limit it to the approved directory, keep credentials out of materials, pass only what is needed, keep review read-only, check facts against their sources, set timeout and budget limits, and do not mark failed work complete. The included rules are in `references/safety-rules.md`. The skill does not actively copy private memory or computer settings. When Office, screenshot, or other tools are missing, the skill states the limitation. It will not fail to start just because a file from the author's machine is missing.
+这一模式使用宿主已有的账户模型和工具，不要求配置我的网关、API key、模型矩阵或任何本机目录。`default`、`lite`、`reasoning` 按宿主实际配置解析，不保证三个不同模型。如果账户只有一个可用模型，可以做独立上下文复核，但会明确标注，不把它说成跨模型验证。具体型号是否有权限，需要以你的账户实际调用为准。
 
-See [docs/004-environment.md](docs/004-environment.md) for installation methods and the prerequisites for each path. This host skill and the Python reference implementation below are two entry points. You do not need to install Python before using it in WorkBuddy.
+建议给每路任务注入简短的通用规则：限定目录、凭据不进材料、最少传递、评审只读、事实回源、超时与预算、未通过不标完成。附带规则已写在 `references/safety-rules.md`，不会主动复制私人记忆或电脑配置。缺少 Office、截图或其他工具时，技能会说明限制，不会因缺作者某个文件而无法开始。
 
-## Try it first
+安装方式和各路径的前提见 [docs/004-environment.md](docs/004-environment.md)。这份宿主技能与下面的 Python 参考实现是两个入口，不是要求先装 Python 才能在 WorkBuddy 用。
 
-You need Python 3.10 or later. From the repository directory, run the offline example without configuring a model or an API key:
+## 先试一下
+
+需要 Python 3.10 或更新版本。先在仓库目录运行离线示例，不用配置模型或 API 密钥：
 
 ```bash
 python examples/demo/run.py
 python tests/run.py
 ```
 
-The example uses a mock provider to simulate model replies and writes files and review records locally. It shows one result that passes the checks and another that leaves placeholders and cannot be delivered normally. This demonstrates the workflow, not the quality of a real model. The example does not require Git. The full tests do require Git to check the staged-content and history release gates, and they clean up the temporary files they create.
+示例用 mock provider 模拟模型回复，会在本地写文件和评审记录。它分别演示一份通过检查的结果，以及一份留下占位符、无法正常交付的结果。这里展示的是流程，不是实际模型的质量。示例不要求 Git；完整测试还需要 Git，以核对暂存与历史发布门禁，并会清理测试自行创建的临时文件。
 
-To try the commands individually, install the reference implementation first:
+想逐步查看命令，可以先安装参考实现：
 
 ```bash
 pip install -e .
 enbanc doctor --offline
 ```
 
-Save the following as `tasks.json` in the repository directory:
+将下面内容保存为仓库目录下的 `tasks.json`：
 
 ```json
 [{"id": "analyst", "prompt": "Write a three-section analysis",
   "kind": "doc", "out": "analysis.md", "verifier": "document"}]
 ```
 
-Then run these commands in order:
+再依次运行：
 
 ```bash
 enbanc --root runs init --run-id demo --requirement "Write a three-section analysis"
@@ -119,39 +124,39 @@ enbanc --root runs dispatch --run-id demo --tasks tasks.json --provider mock
 enbanc --root runs collect --run-id demo
 enbanc --root runs review --run-id demo --provider mock
 enbanc --root runs render --run-id demo
-enbanc --root runs stage --run-id demo --set P5
+enbanc --root runs stage --run-id demo --set P5 --allow-solo --reason "单产物示例"
 ```
 
-Files are saved under `runs/demo/`. The last step can close the run normally only if the review returns `pass`. If it returns `revise`, you need to address the findings first.
+文件保存在 `runs/demo/`。只有评审返回 `pass`，最后一步才能按正常完成收尾；返回 `revise` 时，需要先处理发现的问题。示例只有一个产出方，进入 `P5` 会触发数量闸（少于两条任务默认拒绝），所以最后一步带了豁免参数；实际任务不止一条时不需要它。
 
-## Connecting your own models
+## 接入自己的模型
 
-It currently provides mock and CLI adapters and is not tied to one model service. The CLI adapter passes prompts as command arguments and reads standard output. If your service uses HTTP, you can also write an adapter using the provider interface.
+当前提供 mock 和 CLI 两种适配器，没有绑定某一家模型服务。CLI 适配器通过命令参数传入提示词，再读取标准输出；如果你的服务走 HTTP，也可以按 provider 接口写一个适配器。
 
-Production and review are separated by the role names `producer` and `judge`. You can choose different models for them when connecting your own service, but you need to configure this yourself. The project does not select them automatically. When using a command-line tool, pass the task and review requirements through that tool's actual arguments. Changing only the executable name is not enough.
+产出和评审通过角色名 `producer`、`judge` 分开。接入时可以为它们选择不同的模型，但这件事需要自己配置，项目不会自动挑选。使用命令行工具时，也要按该工具的实际参数传入任务和评审要求，不能只替换一个程序名。
 
-The interface is in [providers/base.py](src/enbanc/providers/base.py), and the CLI adapter is in [providers/cli.py](src/enbanc/providers/cli.py). The public reference implementation currently focuses on text output and does not include a complete Office file generation or editing toolchain. Making actual PowerPoint or Word files requires connecting the appropriate tools.
+接口在 [providers/base.py](src/enbanc/providers/base.py)，CLI 适配器在 [providers/cli.py](src/enbanc/providers/cli.py)。公开参考实现目前以文本输出为主，不包含完整的 Office 文件生成或编辑工具链；要制作真正的 PPT 或 Word 文件，还需要接入相应工具。
 
-## What it can check today
+## 目前能检查什么
 
-The repository includes several basic verifiers to try and extend:
+仓库带了几种基础验证器，便于试跑和扩展：
 
-| Verifier | Current checks |
+| 验证器 | 当前检查范围 |
 |---|---|
-| `document` | Text structure, placeholders, empty links, and minimum length |
-| `page` | HTML title, `lang`, viewport, `img alt`, and some in-page anchors |
-| `deck` | Slide count, character count, and placeholders in Markdown decks; existence and file size only for PPTX |
-| `code` | File existence, some debugging residue, and an optional test command |
+| `document` | 文本结构、占位符、空链接和最低长度 |
+| `page` | HTML 标题、`lang`、viewport、`img alt` 和部分页内锚点 |
+| `deck` | Markdown 幻灯片的页数、字数和占位符；PPTX 仅检查文件是否存在及大小 |
+| `code` | 文件是否存在、部分调试残留，以及可选的测试命令 |
 
-These checks are all fairly basic. Too many characters do not prove that a page will overflow, and meeting a length requirement does not make the content useful. Passing an HTML check says even less about whether a website is well designed. Presentations, websites, and formatted documents still need to be opened or rendered and checked. The current implementation also does not automatically verify every citation or fact.
+这些检查都比较基础。字数过多不等于页面一定溢出，字数达标也不等于内容有用；HTML 检查通过，更不能说明网页设计得当。PPT、网页和排版文档仍需要打开或渲染后检查。当前实现也没有自动核实所有引用和事实。
 
-See [docs/002-verifiers.md](docs/002-verifiers.md) for how to add a verifier. Start with checks you actually need and keep location information so you can return to the original file and check the findings. When review comments involve trade-offs, a person still needs to make the final judgment.
+增加验证器的方法见 [docs/002-verifiers.md](docs/002-verifiers.md)。建议从自己确实需要的检查开始，并保留定位信息，方便回到原文件核对。评审意见涉及取舍时，最终仍需要人判断。
 
-## Keeping it updated
+## 后续更新
 
-The public repository and the local skill I use myself are maintained separately. The local skill may contain specific models, gateways, and paths, so the public version needs separate preparation. I cannot simply copy the entire skill directory over.
+公开仓库与本地自用技能分开维护。本地技能可能包含特定模型、网关和路径，公开版本需要另外整理；不能直接把整个技能目录复制过来。
 
-The current update steps are:
+目前的更新步骤是：
 
 ```bash
 python .sync/publish.py sync
@@ -159,22 +164,22 @@ python .sync/publish.py check
 python .sync/publish.py stage
 ```
 
-`sync` detects whether the local skill has changed. It does not automatically merge those changes into the public implementation. The code and documentation that need updating still have to be prepared manually. `check` runs the privacy scan, tests, and structural and identifier checks on the Chinese and English READMEs. It cannot judge whether a translation reads naturally or guarantee that it finds every sensitive detail. `stage` runs the checks again and reports whether there are unhandled local changes. It does not stage them automatically. The checks also cover staged content and reachable local branch and tag history, so a sensitive value that has already been deleted cannot still be uploaded. Unknown files and binaries are rejected by default.
+`sync` 检测本地技能是否有变化，不会自动把改动合并到公开实现。需要更新的代码和文档仍要人工整理。`check` 做脱敏扫描、测试，以及中文 README 与其英译的结构、标识符检查；它不能判断翻译是否自然，也不能保证发现所有敏感信息。`stage` 会再检查一次，然后提示本地是否有未处理改动，不自动暂存。检查还会覆盖已暂存内容与可达的本地分支、标签历史，防止已经删掉的敏感值仍被上传；未知文件和二进制默认拒绝。
 
-Only after confirming the content, committing locally, and configuring a remote should you use `python .sync/publish.py push --yes`. That command really uploads; the three preceding commands do not. See [docs/003-operations.md](docs/003-operations.md) for the detailed procedure.
+确认内容、完成本地提交并配置远端后，才使用 `python .sync/publish.py push --yes` 推送。这个命令会真的上传；前面的三个命令不会。具体步骤见 [docs/003-operations.md](docs/003-operations.md)。
 
-The public version does not include my computer configuration, gateway, credentials, or private run records. It also has no feature that calls back to an author-operated service. Account-based cloud models still process the material you provide, so a sanitized repository does not mean the whole process is offline. See [docs/005-privacy.md](docs/005-privacy.md) for the scope of the privacy checks and the boundaries they do not cover.
+公开版本不会带上我的电脑配置、网关、密钥或私人运行记录；也没有回连作者服务的功能。账户云模型仍会处理你提供的材料，不能把“仓库已脱敏”理解为“使用过程完全离线”。隐私检查范围与尚未覆盖的边界见 [docs/005-privacy.md](docs/005-privacy.md)。
 
-Offline tests and text scans can only verify the parts they cover. You still need to try it yourself in a real host. The public implementation and my local skill are two separate codebases, and I still need to check their differences manually when updating. That step is not yet fully automated.
+离线测试与文本扫描只能验证它们覆盖的部分，真实宿主里的表现仍需要你自己试。公开实现与本地自用技能是两套代码，更新时我仍需人工核对差异，这一步目前没有做完自动化。
 
-## Working on it together
+## 一起改进
 
-This is a personal project I have gradually organized through use. I'm not a professional developer, so maintenance and replies may not always be timely. Issues, documentation improvements, tests, and better adapters are welcome. You are also welcome to fork it or create your own repository to improve and share it. Just retain the required notices under the MIT license. You do not need to ask me for separate permission.
+这是个人在使用中逐步整理的项目，我不是职业开发者，维护和回复可能不够及时。欢迎提交问题、补文档、做测试、改善适配，也欢迎 fork 或自行建立仓库继续完善和分享。按 MIT 许可保留相应声明即可，不需要另外向我申请。
 
-If you make your own version, I would also like to know where you use it and what you have improved. When convenient, please send me the repository link so we can learn from each other. Letting me know is an invitation, not an extra condition on using or distributing the project.
+如果你做了自己的版本，我也想了解它用在什么场景、有哪些改进。方便时请把仓库链接发给我，我们可以相互借鉴；告知是邀请，不是使用或分发的附加条件。
 
-Contact: [pyq3367@zoho.com](mailto:pyq3367@zoho.com). This is a project contact address I have agreed to publish. GitHub has no general private-messaging feature, so project questions can be discussed through an Issue or email. For security or privacy concerns, please email first and do not post raw logs, account details, or credentials publicly. Publishing the address may attract spam, and replies may be delayed.
+联系邮箱：[pyq3367@zoho.com](mailto:pyq3367@zoho.com)。这是我同意公开的项目联系地址。GitHub 本身没有通用私信功能，项目问题可以通过 Issue 或邮件交流；涉及安全或隐私的问题请先发邮件，不要公开原始日志、账号或密钥。邮箱公开后可能收到垃圾邮件，回复也可能有延迟。
 
-## License
+## 许可
 
-MIT. See [LICENSE](LICENSE).
+采用 MIT 许可，见 [LICENSE](LICENSE)。

@@ -20,7 +20,10 @@ STATE = REPO / ".sync" / "state.json"
 TIMEOUT = 120
 # Only the explicitly authorized project contact address may be public.
 PUBLIC_CONTACT = "pyq3367@zoho.com"
-CONTACT_FILES = {"README.md", "README.zh-CN.md", "docs/005-privacy.md"}
+# The renamed file stays listed: history is scanned with the current allow-list,
+# so dropping a name that once held the contact address turns every past commit
+# into a violation. Adding a name here is a whitelist change, not a bypass.
+CONTACT_FILES = {"README.md", "README.en.md", "README.zh-CN.md", "docs/005-privacy.md"}
 # Git records the author in the commit object itself, so the authorized
 # address is expected to appear there too.
 CONTACT_CONTEXTS = CONTACT_FILES | {"[历史提交]", "[历史标签]"}
@@ -324,25 +327,28 @@ PARITY_TERMS = ("delivered", "needs_human", "unverified", "blocked", "stalled",
 
 
 def readme_parity() -> list[str]:
-    en_p, zh_p = REPO / "README.md", REPO / "README.zh-CN.md"
-    if not zh_p.exists():
+    # README.md is the primary text and is written in Chinese; README.en.md is
+    # the translation. Parity is checked in that direction: a translation that
+    # silently drops a mechanism label has stopped being a translation.
+    main_p, alt_p = REPO / "README.md", REPO / "README.en.md"
+    if not alt_p.exists():
         return []
-    en = en_p.read_text(encoding="utf-8")
-    zh = zh_p.read_text(encoding="utf-8")
+    main = main_p.read_text(encoding="utf-8")
+    alt = alt_p.read_text(encoding="utf-8")
     problems = []
     for label, a, b in (
-        ("H2章节", sum(x.startswith("## ") for x in en.splitlines()), sum(x.startswith("## ") for x in zh.splitlines())),
-        ("H3章节", sum(x.startswith("### ") for x in en.splitlines()), sum(x.startswith("### ") for x in zh.splitlines())),
-        ("代码围栏", en.count("```"), zh.count("```")),
-        ("表格行", sum(x.strip().startswith("|") for x in en.splitlines()), sum(x.strip().startswith("|") for x in zh.splitlines())),
+        ("H2章节", sum(x.startswith("## ") for x in main.splitlines()), sum(x.startswith("## ") for x in alt.splitlines())),
+        ("H3章节", sum(x.startswith("### ") for x in main.splitlines()), sum(x.startswith("### ") for x in alt.splitlines())),
+        ("代码围栏", main.count("```"), alt.count("```")),
+        ("表格行", sum(x.strip().startswith("|") for x in main.splitlines()), sum(x.strip().startswith("|") for x in alt.splitlines())),
     ):
         if a != b:
-            problems.append(f"{label}数量不同：en={a} zh={b}")
-    if any((term in en) != (term in zh) for term in PARITY_TERMS):
+            problems.append(f"{label}数量不同：主={a} 译={b}")
+    if any((term in main) != (term in alt) for term in PARITY_TERMS):
         problems.append("README机制标识不一致")
-    literals = {m.strip() for m in re.findall(r"`([^`\n]{1,40})`", en)}
-    if any(literal not in zh for literal in literals):
-        problems.append("README.zh-CN.md缺少英文README中的字面标识")
+    literals = {m.strip() for m in re.findall(r"`([^`\n]{1,40})`", main)}
+    if any(literal not in alt for literal in literals):
+        problems.append("README.en.md缺少中文README中的字面标识")
     return problems
 
 

@@ -5,7 +5,7 @@ display_name_en: enbanc
 description: 在用户输入 /enbanc 或合议：时，为文档、PPT、网页、报告及其他高价值产物组织多路执行、独立评审与返修。不依赖作者的模型网关、路径或凭据。
 description_zh: 为需要认真核对的交付物安排独立评审，保留证据与返修记录。
 description_en: Coordinate production, independent review, and revision for high-value work using the host's available models and tools.
-version: 0.2.0
+version: 0.2.1
 author: enbanc contributors
 agent_created: true
 ---
