@@ -78,6 +78,7 @@ A run also records four things about its own honesty:
 - A review whose reported usage falls below the threshold is marked `insufficient_review` rather than `pass`: a one-line approval reviewed nothing. A provider that reports no usage is only flagged, not failed.
 - Tasks that declare the paths they write (`writes`) run in parallel when those sets do not overlap and one after another when they do. Two undeclared tasks aiming at the same file are refused before anything starts.
 - `inspect` sweeps every run without changing a thing, reporting a run that never dispatched a task, a review too thin to count, or a task recorded as running long after its process is gone, and exits 10 when it finds one.
+- Cost is used only to break ties between models of similar quality, and its shape is detected once: whether the panel publishes a credits multiplier or per-token prices, `enbanc scoring` recognises it and records the answer. Reading the wrong shape does not raise an error — the cost term just stops discriminating while the ranking still looks reasonable.
 
 Findings from programmatic checks and model review are recorded together. A verifier finding marked `high` prevents that round from passing, and the model cannot directly delete those records. Verifiers can also make mistakes, especially with approximate rules such as character counts. Confirm that a verifier suits your task before using it.
 

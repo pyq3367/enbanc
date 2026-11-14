@@ -15,6 +15,7 @@ from .inspect import DEFAULT_STALL_MIN, DEFAULT_THIN_TOKENS, inspect_root
 from .mandate import Mandate
 from .providers import CliProvider, MockProvider
 from .route import route
+from .scoring import describe, resolve
 from .state import Run
 from .verifiers import default_verifiers
 
@@ -200,6 +201,30 @@ def cmd_doctor(a):
     return run_offline()
 
 
+def cmd_scoring(a):
+    """认一次本地面板的成本形态并记住，或查看当前结论。
+
+    只读 --models 显式给出的清单，不猜宿主配置文件的位置：面板格式不统一，
+    猜错会给出「看起来正常但不再区分贵贱」的排序。
+    """
+    models = None
+    if a.models:
+        payload = json.loads(Path(a.models).read_text(encoding="utf-8"))
+        models = payload.get("data") if isinstance(payload, dict) else payload
+        if not isinstance(models, list):
+            print("scoring: --models must hold a list or an object with a 'data' list")
+            return 2
+    mode, evidence = resolve(models, override=a.mode or None, refresh=a.refresh)
+    if not a.quiet:
+        print(f"scoring: {mode or 'unset'}")
+        for key in ("price_coverage", "credits_coverage", "models", "note", "forced"):
+            if key in evidence:
+                print(f"  {key}: {evidence[key]}")
+        if not a.models and mode:
+            print("  use --models <file> to re-detect from a panel listing, --refresh to probe again")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="enbanc", description="long-haul verification for high-value artifacts")
     ap.add_argument("--root", default=None)
@@ -213,6 +238,14 @@ def main(argv: list[str] | None = None) -> int:
     p = add("doctor", cmd_doctor, help="离线便携性检查，不验证账户登录或模型权限")
     p.add_argument("--offline", action="store_true", default=True,
                    help="仅离线检查（默认），不读取认证配置或执行账户 CLI")
+
+    p = add("scoring", cmd_scoring,
+            help="识别并记住成本口径（price 单价 / credits 倍率），首次运行自动认一次")
+    p.add_argument("--models", default="", help="模型清单 JSON（list 或含 data 列表）；不给则只读已记录结论")
+    p.add_argument("--mode", choices=["price", "credits"], default="",
+                   help="强制指定口径并写回记录")
+    p.add_argument("--refresh", action="store_true", help="忽略缓存重新识别")
+    p.add_argument("--quiet", action="store_true", help="只写记录，不打印")
 
     p = add("init", cmd_init)
     p.add_argument("--run-id", required=True)

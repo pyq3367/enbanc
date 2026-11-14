@@ -11,7 +11,18 @@ pip install -e .
 enbanc doctor --offline
 ```
 
-`doctor` 不读取认证配置，不调用云模型，检查结果不能证明账号已登录或某个型号已获授权。
+`doctor` 不读取认证配置，不调用云模型，检查结果不能证明账号已登录或某个型号已获授权。它也不读项目外的记录文件，只在输出里说明成本口径未检查、由显式的 `enbanc scoring` 负责。
+
+成本口径只需认一次：
+
+```bash
+enbanc scoring --models panel.json   # 按清单认出倍率或单价形态并写进记录
+enbanc scoring                       # 查看当前记录
+enbanc scoring --mode price          # 强制指定并写回
+enbanc scoring --models panel.json --refresh   # 面板换代后重新识别
+```
+
+记录写在 `ENBANC_HOME`（默认 `~/.enbanc`）下的 `scoring-mode.json`。`--models` 的清单是模型列表 JSON，可以是裸数组，也可以是含 `data` 数组的对象；不给 `--models` 时只读已记录结论，不猜宿主配置文件的位置。
 
 ## 文本参考实现的流程
 

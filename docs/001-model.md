@@ -91,6 +91,36 @@ review completes.
 |---|---|
 | a session per task | the provider owns sessions; enbanc owns artifacts |
 | message queues between tasks | tasks do not talk; they produce files and reports |
-| cost accounting | provider-specific, and wrong numbers are worse than none |
+| cost accounting | provider-specific, and wrong numbers are worse than none — see *Cost shape* below |
 | a scheduler | a run is started by a person, not by an event |
 | retry policies on the judge | escalation replaces retry; see [rules.md](reference/rules.md) §5 |
+
+## Cost shape
+
+There is no ledger. There is one relative number per model, used only to break
+ties between models of similar quality, and it has to be read from whatever the
+panel publishes:
+
+| Shape | Looks like | Breaks when |
+|---|---|---|
+| `credits` | a multiplier per model, e.g. `0.69x` | the panel stops publishing it |
+| `price` | per-token `prompt` / `completion` / `cache_read` | the panel publishes only some models |
+
+Reading the wrong shape does not raise an error. Every cost becomes unknown, the
+cost term drops out of the ranking, and the ranking keeps looking reasonable
+while it has stopped discriminating. So the shape is detected **once** from a
+model listing, the answer is written to `scoring-mode.json` under `ENBANC_HOME`
+(default `~/.enbanc`), and later runs read that record instead of re-guessing.
+
+```bash
+enbanc scoring --models panel.json     # detect and remember
+enbanc scoring                          # show what is recorded
+enbanc scoring --mode credits           # force a shape and record the decision
+enbanc scoring --models panel.json --refresh   # after the panel changed
+```
+
+A published `0` is a price, not a missing field: free tiers must stay free in
+the ranking rather than drift to the expensive end. Unit prices are blended
+`3:1` prompt:completion before comparison — prompt tokens dominate review and
+sub-agent traffic, while cache reads are excluded because panels report them
+inconsistently.

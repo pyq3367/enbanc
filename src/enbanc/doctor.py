@@ -89,6 +89,10 @@ def run_offline() -> int:
     for name, found in discover_cli().items():
         print(f"CLI {name}: {'found' if found else 'not-found (optional)'}")
     print("office: optional/not-checked")
+    # Deliberately not read here: the recorded scoring mode lives outside the
+    # project, and this check never touches files outside the sandbox. The
+    # explicit `enbanc scoring` command is where that record is read.
+    print("scoring: not-checked (offline; run `enbanc scoring` to detect and record a shape)")
     print("desktop login: unverified（需要用户人工确认）")
     print("model permissions: unverified（需要用户人工确认）")
     print("provider workbuddy: unsupported（未实现账户适配，不调用模型）")

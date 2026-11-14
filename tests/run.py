@@ -26,13 +26,14 @@ sys.path.insert(0, str(HERE))
 import test_smoke  # noqa: E402
 import test_privacy  # noqa: E402
 import test_distribution  # noqa: E402
+import test_scoring  # noqa: E402
 import test_portable  # noqa: E402
 import unittest
 from support import make_temp_dir, record_sandbox
 
 
 def main() -> int:
-    tests = [(n, f) for module in (test_smoke, test_privacy, test_distribution)
+    tests = [(n, f) for module in (test_smoke, test_privacy, test_distribution, test_scoring)
              for n, f in vars(module).items() if n.startswith("test_") and callable(f)]
     base = os.environ.get("ENBANC_TEST_TMP") or os.environ.get("TMPDIR") or os.environ.get("TEMP") or tempfile.gettempdir()
     base_path = Path(base).resolve()
