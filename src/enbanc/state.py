@@ -25,10 +25,31 @@ STAGE_LABEL = {
     "P4": "escalate",
     "P5": "deliver",
 }
-OUTCOMES = ("completed", "stopped_by_user", "abandoned")
+OUTCOMES = ("completed", "accepted_with_residual", "stopped_by_user",
+            "degraded_delivery", "abandoned")
+
+# How a forced close is allowed to describe itself. "The user told me to stop"
+# and "the run fell short and I am shipping it anyway" are different events, and
+# the second one must not be recorded as the first.
+FORCE_KINDS = ("user_stop", "degraded_delivery")
 
 # Derived states, in match order. "person" states mean: no progress without a human.
-DERIVED = ("delivered", "ready", "needs_human", "blocked", "stalled", "working", "review", "idle")
+DERIVED = ("abandoned", "delivered", "degraded", "ready", "needs_human",
+           "blocked", "stalled", "working", "review", "idle")
+
+# Stages where a review is the point of entry: if nothing finished, there is
+# nothing a judge could look at, and an empty pass is worse than no review.
+REVIEW_STAGES = ("P3", "P4")
+
+
+class GateRefused(PermissionError):
+    """A gate refused, with the exit code the CLI should use for it.
+
+    Callers need to tell "you are not allowed yet" (1) from "this needs a
+    different, honest record" (9), so the refusal carries its own code.
+    """
+
+    code = 9
 
 TERMINAL = ("done", "degraded", "failed", "timeout", "unverified")
 
@@ -332,11 +353,16 @@ class Run:
         vote = st.get("vote") or {}
 
         if outcome == "abandoned":
-            return "needs_human"
+            return "abandoned"
         if passed:
             if outcome == "completed" or st.get("stage") == "P5":
                 return "delivered"
             return "ready"
+        # A degraded delivery is delivered, but it is not a clean one: the
+        # derived state keeps the difference visible instead of folding it
+        # into "delivered" and letting the outcome field be the only witness.
+        if outcome == "degraded_delivery" and st.get("stage") == "P5":
+            return "degraded"
         if st.get("stage") == "P5" or vote.get("final") == "revise" or st.get("escalation_exhausted"):
             return "needs_human"
         if any(t.get("status") in ("failed", "timeout") for t in tasks.values()):
@@ -403,33 +429,125 @@ class Run:
                 continue
         return False
 
+    def _loose_failures(self) -> list[str]:
+        """Tasks that fell short and were not replaced by a later path.
+
+        A failure that has been superseded is not a loose end: the work it
+        stood for is covered elsewhere, and counting it would make every
+        repaired run look broken forever.
+        """
+        return [tid for tid, t in (self.state.get("tasks") or {}).items()
+                if t.get("status") in ("failed", "timeout") and not t.get("superseded_by")]
+
+    def _running(self) -> list[str]:
+        return [tid for tid, t in (self.state.get("tasks") or {}).items()
+                if t.get("status") == "running"]
+
+    def _degrade_factors(self) -> list[str]:
+        """One line per reason this delivery is not a clean one."""
+        tasks = self.state.get("tasks") or {}
+        factors = []
+        loose = self._loose_failures()
+        if loose:
+            factors.append("%d path(s) failed or timed out: %s" % (len(loose), ", ".join(sorted(loose))))
+        unverified = [tid for tid, t in tasks.items() if t.get("status") == "unverified"]
+        if unverified:
+            factors.append("%d path(s) unverified: %s"
+                           % (len(unverified), ", ".join(sorted(unverified))))
+        if not (self.state.get("reviews") or []):
+            factors.append("no review was ever recorded")
+        if not self.artifacts_present():
+            factors.append("no artifact exists on disk")
+        return factors
+
+    def _check_forced_close(self, force_kind: str) -> None:
+        """Decide whether this forced close may describe itself as it wants to."""
+        running = self._running()
+        if running:
+            raise GateRefused(
+                "refusing to close while %d task(s) still run (%s): collect them "
+                "first, so the record reflects finished work rather than a guess"
+                % (len(running), ", ".join(sorted(running))))
+        if force_kind != "user_stop":
+            return
+        loose = self._loose_failures()
+        missing = []
+        if loose:
+            missing.append("%d path(s) failed or timed out" % len(loose))
+        if not (self.state.get("reviews") or []):
+            missing.append("no review was ever recorded")
+        if not self.artifacts_present():
+            missing.append("no artifact exists on disk")
+        if missing:
+            raise GateRefused(
+                "refusing to record a user stop: " + ", ".join(missing) + ". This is a "
+                "degraded delivery, not a run that was fine until the user spoke: use "
+                "--force-kind degraded_delivery --reason \"...\" so the factors stay countable")
+
     # -- stage gate ----------------------------------------------------------
     def set_stage(self, target: str, force: bool = False, reason: str = "",
-                  accept_residual: bool = False, allow_solo: bool = False) -> None:
+                  accept_residual: bool = False, allow_solo: bool = False,
+                  force_kind: str = "user_stop", allow_degraded: bool = False) -> None:
         if target not in STAGES:
             raise ValueError(f"stage must be one of {STAGES}")
+        if force_kind not in FORCE_KINDS:
+            raise ValueError(f"force_kind must be one of {FORCE_KINDS}")
+        reason = (reason or "").strip()
+        previous = self.state.get("stage", "")
+        running = self._running()
+        loose = self._loose_failures()
         if target == "P5":
-            if self.is_conditional() and not accept_residual and not force:
+            passed = self.is_passed()
+            conditional = self.is_conditional()
+            if conditional and not accept_residual and not force:
                 last = self.last_review() or {}
                 raise PermissionError(
                     "refusing to mark delivered: last verdict=conditional_pass with %d open "
                     "finding(s). Fix them, or accept them explicitly (--accept-residual)."
                     % len(last.get("issues") or [])
                 )
-            if not self.is_passed() and not self.is_conditional() and not force:
+            if not passed and not conditional and not force:
                 last = self.last_review() or {}
                 raise PermissionError(
                     "refusing to mark delivered: last verdict=%s (%d open findings). "
                     "Pass review, escalate, or force with a reason."
                     % (last.get("verdict", "none"), len(last.get("issues") or []))
                 )
-            if not self.is_passed() and not self.is_conditional() and not reason.strip():
-                raise ValueError("forcing delivery requires --reason: 'unfinished' and 'decided not to' are different things")
+            if force:
+                if running:
+                    raise GateRefused(
+                        "refusing to close while %d task(s) still run (%s): collect them "
+                        "first, so the record reflects finished work rather than a guess"
+                        % (len(running), ", ".join(sorted(running))))
+                if not passed and not conditional:
+                    if not reason:
+                        raise ValueError("forcing delivery requires --reason: 'unfinished' and 'decided not to' are different things")
+                    self._check_forced_close(force_kind)
             if not self.artifacts_present() and not force:
                 raise PermissionError(
                     "refusing to mark delivered: no artifact exists on disk. "
                     "Produce the deliverable, or force with a reason if there is none."
                 )
+
+        # A stage whose purpose is review must not open with nothing finished.
+        # Same shape as the empty-directory incidents, one step earlier: the
+        # cursor moved, no worker had returned, and the judge was handed silence.
+        degrade_entry: dict | None = None
+        if target in REVIEW_STAGES and self.state.get("tasks"):
+            done = sum(1 for t in (self.state.get("tasks") or {}).values()
+                       if t.get("status") in ("done", "degraded"))
+            if done == 0:
+                if not (allow_degraded and reason):
+                    if allow_degraded and not reason:
+                        raise ValueError("--allow-degraded requires --reason: the record has to say why no path finished")
+                    raise GateRefused(
+                        "refusing to enter %s: %d task(s) recorded and none finished. "
+                        "Collect the run first, or advance knowingly with "
+                        "--allow-degraded --reason \"...\""
+                        % (target, len(self.state.get("tasks") or {})))
+                degrade_entry = {"stage": target, "reason": reason, "done": done,
+                                 "tasks": len(self.state.get("tasks") or {}),
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
 
         # Quantity gate. Splitting the work is what makes an independent look
         # possible; one task means the producer and the reviewer are the same
@@ -441,7 +559,7 @@ class Run:
             if force:
                 skip_gate = target == "P5"
             elif allow_solo:
-                why = reason.strip()
+                why = reason
                 if not why:
                     raise ValueError(
                         "--allow-solo requires --reason: an unexplained single-handed run is "
@@ -462,14 +580,21 @@ class Run:
             if solo_waiver:
                 st.setdefault("solo_waivers", []).append(solo_waiver)
                 st["solo_waiver"] = solo_waiver
+            if degrade_entry:
+                st.setdefault("degraded_stages", []).append(degrade_entry)
             if skip_gate:
                 # Forcing past the gate is a decision; it stays countable.
                 st.setdefault("force_skip_quantity_gate", []).append(
-                    {"stage": target, "tasks": task_count, "reason": reason.strip(),
+                    {"stage": target, "tasks": task_count, "reason": reason,
                      "at": time.strftime("%Y-%m-%dT%H:%M:%S")})
             if target == "P5":
                 if self.is_passed():
                     st["outcome"] = "completed"
+                    if force and not self.artifacts_present():
+                        # The pass is real; the file it was about is not in the
+                        # run directory. That is worth a line, not a refusal.
+                        st["outcome_note"] = ("forced past the artifact gate: no artifact "
+                                              "exists in the run directory")
                 elif self.is_conditional() and accept_residual:
                     # Accepted with findings: not completed (it did not pass),
                     # not stopped_by_user (nobody halted it). Keep it separable
@@ -478,14 +603,26 @@ class Run:
                     st["outcome_residual"] = (self.last_review() or {}).get("issues") or []
                     st["outcome_reason"] = "user accepted %d open finding(s)" % len(st["outcome_residual"])
                     st["outcome_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                elif force and force_kind == "degraded_delivery":
+                    # Shipping something that fell short is legitimate. Calling
+                    # it a user stop is not: that is how a run whose sub-agents
+                    # all died got counted as "the user changed their mind".
+                    st["outcome"] = "degraded_delivery"
+                    st["outcome_degrade_factors"] = self._degrade_factors()
+                    st["outcome_reason"] = reason
+                    st["outcome_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
                 else:
                     st["outcome"] = "stopped_by_user"
-                    st["outcome_reason"] = reason.strip()
+                    st["outcome_reason"] = reason
                     st["outcome_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             return st
 
         self.update(mut)
-        self.event("stage", {"to": target, "outcome": self.state.get("outcome", "")})
+        self.event("stage", {"from": previous, "to": target,
+                             "outcome": self.state.get("outcome", ""),
+                             "reason": reason,
+                             "force_kind": force_kind if force else "",
+                             "loose": loose, "running": running})
 
     # -- collect -------------------------------------------------------------
     def collect(self) -> list[str]:
@@ -541,6 +678,64 @@ class Run:
                 self.event("collect", {"change": c})
         return changes
 
+    # -- sub-agents dispatched by the host -----------------------------------
+    def register_sub(self, task_id: str, status: str, *, model: str = "",
+                     channel: str = "native", artifact: str = "", note: str = "",
+                     timeout: float = 900.0) -> dict:
+        """Record a sub-agent the host's own tooling dispatched.
+
+        `dispatch` only knows the tasks it launched itself, so paths started by
+        a native tool were invisible: the counter said zero, the inspection said
+        nobody worked, and the review had no artifact to read. Registering them
+        is what makes the ledger cover the whole run rather than one launcher.
+        """
+        task_id = str(task_id).strip()
+        if not task_id or "/" in task_id or "\\" in task_id:
+            raise ValueError("task id must be a plain name, not a path")
+        if status not in TERMINAL + ("running",):
+            raise ValueError(f"status must be one of {TERMINAL + ('running',)}")
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+
+        def mut(st: dict) -> dict:
+            task = (st.setdefault("tasks", {})).setdefault(task_id, {"id": task_id})
+            task["status"] = status
+            task["channel"] = channel
+            if model:
+                task["model"] = model
+            if artifact:
+                task["artifact"] = artifact
+            if note:
+                task["note"] = note
+            task.setdefault("started", now)
+            if status == "running":
+                task["timeout"] = float(timeout)
+                task.pop("elapsed", None)
+            else:
+                task.setdefault("elapsed", _elapsed_since(task.get("started")))
+                if status in ("failed", "timeout") and not task.get("error"):
+                    task["error"] = note or "reported failed by the host"
+            return st
+
+        self.update(mut)
+        self.event("sub", {"id": task_id, "status": status, "channel": channel})
+        return (self.state.get("tasks") or {}).get(task_id) or {}
+
+    def abandon(self, reason: str) -> dict:
+        """Close the run as abandoned: no delivery, no pretence of one."""
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("abandoning requires --reason: an unexplained dead run is indistinguishable from a forgotten one")
+
+        def mut(st: dict) -> dict:
+            st["outcome"] = "abandoned"
+            st["outcome_reason"] = reason
+            st["abandoned_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            return st
+
+        self.update(mut)
+        self.event("abandon", {"reason": reason})
+        return {"outcome": "abandoned", "reason": reason}
+
     # -- rendering -----------------------------------------------------------
     def render(self) -> str:
         st = self.state
@@ -562,15 +757,33 @@ class Run:
                 tail += f", {n} open"
         esc = len(st.get("escalations") or [])
         solo = " | solo-waiver" if st.get("solo_waiver") else ""
-        return "[%s] %s | cursor %s | %s%s%s%s" % (
+        degraded = ""
+        if st.get("outcome") == "degraded_delivery":
+            degraded = " | degraded delivery (%d factor(s))" % len(st.get("outcome_degrade_factors") or [])
+        elif st.get("outcome") == "accepted_with_residual":
+            degraded = " | accepted with %d residual" % len(st.get("outcome_residual") or [])
+        return "[%s] %s | cursor %s | %s%s%s%s%s" % (
             self.run_id,
             self.derive(),
             st.get("stage", "?"),
             "/".join(parts),
             f" | escalations {esc}" if esc else "",
             solo,
+            degraded,
             tail,
         )
+
+
+def _elapsed_since(stamp: str | None) -> float | None:
+    """Seconds since a `%Y-%m-%dT%H:%M:%S` stamp, or None when unreadable.
+
+    Elapsed time comes from the clock, never from an estimate: a run described
+    as "about 35 minutes" when it was 8 is a conclusion nobody can audit.
+    """
+    try:
+        return round(time.time() - time.mktime(time.strptime(str(stamp), "%Y-%m-%dT%H:%M:%S")), 1)
+    except (TypeError, ValueError):
+        return None
 
 
 def _pid_alive(pid: int) -> bool:

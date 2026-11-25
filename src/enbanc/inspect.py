@@ -22,6 +22,7 @@ because a real run looked finished and was not.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -32,6 +33,12 @@ from .state import SOLO_GATED
 STALL_STAGES = ("P0", "P1")
 DEFAULT_STALL_MIN = 120.0
 DEFAULT_THIN_TOKENS = 120
+
+# A waiver that says "not dispatched yet" is not a waiver. It is the gate being
+# bypassed by a promise, and the promise is exactly what the gate checks.
+WAIVER_INTENT = re.compile(
+    r"(?i)(即将|将要|将要派|准备派|待派|尚未派|about to|going to dispatch|"
+    r"will dispatch|preparing to dispatch|not yet dispatched)")
 
 
 def _last_activity(state: dict, run_dir: Path) -> float | None:
@@ -100,6 +107,33 @@ def inspect_run(run_dir: Path, stall_min: float = DEFAULT_STALL_MIN,
     if stage in SOLO_GATED and not tasks and not state.get("solo_waiver"):
         findings.append({"code": "zero_sub", "run": run_dir.name,
                          "detail": f"cursor at {stage} with no task ever dispatched"})
+
+    # A waiver whose reason means "the dispatch has not happened yet" is the
+    # gate being talked past. It stays a finding even though the field exists,
+    # because the field is the only thing the gate accepted.
+    waiver = state.get("solo_waiver") or {}
+    if isinstance(waiver, dict):
+        why = str(waiver.get("reason") or "")
+        if WAIVER_INTENT.search(why):
+            findings.append({"code": "bogus_waiver", "run": run_dir.name,
+                             "detail": "waiver reason describes a dispatch that had not "
+                                       "happened yet, which is the work the gate asks for"})
+
+    # A stop recorded as a user request while paths were failing. This is the
+    # historical mislabelling: sub-agents died, the close was forced, and the
+    # statistic read "the user changed their mind". Old runs stay auditable.
+    if state.get("outcome") == "stopped_by_user":
+        loose = [tid for tid, t in tasks.items()
+                 if isinstance(t, dict) and t.get("status") in ("failed", "timeout")
+                 and not t.get("superseded_by")]
+        if loose or not (state.get("reviews") or []):
+            why = []
+            if loose:
+                why.append(f"{len(loose)} task(s) failed or timed out")
+            if not (state.get("reviews") or []):
+                why.append("no review exists")
+            findings.append({"code": "mislabeled_stop", "run": run_dir.name,
+                             "detail": "recorded as a user stop while " + " and ".join(why)})
 
     # A pass bought with a handful of tokens reviewed nothing.
     for review in state.get("reviews") or []:

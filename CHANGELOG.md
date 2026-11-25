@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.2.3 — 2026-11-25
+
+A close that names the wrong cause is worse than no close: it cannot be audited
+later. This release separates the two ways a run ends without a pass, refuses to
+close while work is still moving, and stops a review from opening with nothing
+finished. It also makes paths the host dispatched itself visible to the ledger.
+
+### Added
+
+- **`enbanc sub`** — registers a sub-agent the host dispatched with its own
+  tooling: id, status, model, channel, and the artifact that review should read.
+  Without it a natively dispatched path is invisible — absent from the counts,
+  absent from review, and `inspect` can only report that nobody worked.
+- **`enbanc abandon`** — closes a run as `abandoned` with a reason. Terminal,
+  not a delivery, and the stage cursor is kept so the run can still be traced.
+- **Two inspection codes.** `bogus_waiver` flags a single-handed waiver whose
+  reason means the dispatch had not happened yet — the gate being talked past.
+  `mislabeled_stop` flags historical runs recorded as a user stop while paths
+  had failed or no review existed.
+- Derived states `abandoned` and `degraded`, so a degraded delivery does not
+  read as a clean one.
+
+### Changed
+
+- **`--force` now has to say which close it is.** `--force-kind user_stop`
+  (default) is for a run that was fine until the user spoke: it requires no
+  failed path, at least one review, and an artifact, and is refused with exit
+  code 9 otherwise, pointing at the other kind. `--force-kind degraded_delivery`
+  records `outcome=degraded_delivery` plus `outcome_degrade_factors` — failed
+  paths, unverified paths, missing review, missing artifact — each as one line.
+- **No forced close while any task is still recorded as running.** Collect
+  first; a close written over moving work is a guess wearing a timestamp.
+- **Entering `P3` or `P4` with tasks recorded and none finished is refused.**
+  Advancing deliberately requires `--allow-degraded --reason`, recorded in
+  `degraded_stages`.
+- `stage` events now carry `from`, `reason`, `force_kind`, `loose` and `running`,
+  so why a run was closed is reconstructable from the log alone.
+- `render` prints the degraded factors and the accepted residual count instead
+  of leaving the outcome field as the only witness.
+
+### Why
+
+One audit run dispatched five paths, lost two to failure and one to timeout,
+never reached a review, and was forced to `P5` anyway. The record said
+`stopped_by_user` — so the statistic read "the user changed their mind", not
+"the run collapsed". A second family of runs wrote `subagents=0` while five
+paths were dispatched natively: nothing in the ledger, nothing to review, and an
+inspection that could only say no work had happened.
+
+Tests: 98 → 108, with each new case naming the incident it pins.
+
 ## 0.2.2 — 2026-11-15
 
 Cost has a shape, and reading it wrongly fails quietly. This release names the

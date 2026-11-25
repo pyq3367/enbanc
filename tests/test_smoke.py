@@ -88,10 +88,40 @@ def test_force_requires_a_reason(tmp_path):
         run.set_stage("P5", force=True)
 
 
-def test_forced_delivery_is_recorded_as_stopped(tmp_path):
+def test_a_forced_close_cannot_call_itself_a_user_stop(tmp_path):
+    """The accident this gate exists for.
+
+    Five paths were dispatched, two failed, one timed out, nothing was
+    reviewed, and the close was forced. The record said stopped_by_user, so the
+    statistic read "the user changed their mind" instead of "the run collapsed".
+    """
     run = Run.init("r", "do the thing", tmp_path)
-    run.set_stage("P5", force=True, reason="user stopped the run")
-    assert run.state["outcome"] == "stopped_by_user"
+    run.update(lambda st: {**st, "tasks": {
+        "a": {"id": "a", "status": "failed"}, "b": {"id": "b", "status": "timeout"}}})
+    with raises(PermissionError, match="degraded_delivery"):
+        run.set_stage("P5", force=True, reason="user stopped the run")
+    assert Run.load("r", tmp_path).state["stage"] != "P5"
+
+    run = Run.load("r", tmp_path)
+    run.set_stage("P5", force=True, force_kind="degraded_delivery",
+                  reason="two paths died and nothing was produced")
+    st = Run.load("r", tmp_path).state
+    assert st["outcome"] == "degraded_delivery", st["outcome"]
+    assert st["outcome_degrade_factors"]
+    assert any("failed" in f for f in st["outcome_degrade_factors"])
+    assert "no review was ever recorded" in st["outcome_degrade_factors"]
+    assert Run.load("r", tmp_path).derive() == "degraded"
+
+
+def test_a_forced_close_is_refused_while_a_path_still_runs(tmp_path):
+    run = Run.init("busy", "do the thing", tmp_path)
+    run.update(lambda st: {**st, "tasks": {
+        "a": {"id": "a", "status": "running", "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+              "timeout": 900},
+        "b": {"id": "b", "status": "done"}}})
+    with raises(PermissionError, match="still run"):
+        run.set_stage("P5", force=True, force_kind="degraded_delivery", reason="stop now")
+    assert Run.load("busy", tmp_path).state["stage"] != "P5"
 
 
 def test_derived_state_never_calls_a_failed_run_delivered(tmp_path):
@@ -386,16 +416,101 @@ def test_allow_solo_without_a_reason_is_refused(tmp_path):
 
 def test_force_past_the_quantity_gate_is_counted(tmp_path):
     run = Run.init("forced", "produce a report", tmp_path)
-    run.set_stage("P5", force=True, reason="user stopped the run")
+    run.set_stage("P5", force=True, force_kind="degraded_delivery",
+                  reason="nothing was dispatched; shipping the empty shell")
     st = Run.load("forced", tmp_path).state
     assert st["stage"] == "P5"
     assert "solo_waiver" not in st
     rec = st["force_skip_quantity_gate"][-1]
     assert rec["stage"] == "P5" and rec["tasks"] == 0
-    assert rec["reason"] == "user stopped the run" and rec["at"]
+    assert rec["reason"] == "nothing was dispatched; shipping the empty shell" and rec["at"]
 
 
-# -- review usage gate -------------------------------------------------------
+# -- review entry gate -------------------------------------------------------
+
+def test_review_stage_refuses_a_run_where_nothing_finished(tmp_path):
+    """Entering review with zero finished paths hands the judge silence.
+
+    Real case: P3 was entered at 0 done / 2 failed / 1 running, and the empty
+    result went straight into review.
+    """
+    run = Run.init("emptyrev", "produce a report", tmp_path)
+    run.update(lambda st: {**st, "tasks": {
+        "a": {"id": "a", "status": "failed"}, "b": {"id": "b", "status": "running",
+                                                    "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                                                    "timeout": 900}}})
+    with raises(PermissionError, match="none finished"):
+        run.set_stage("P3")
+    assert Run.load("emptyrev", tmp_path).state["stage"] != "P3"
+
+
+def test_allow_degraded_records_why_review_opened_empty(tmp_path):
+    run = Run.init("degrev", "produce a report", tmp_path)
+    run.update(lambda st: {**st, "tasks": {
+        "a": {"id": "a", "status": "failed"}, "b": {"id": "b", "status": "unverified"}}})
+    with raises(ValueError, match="--allow-degraded requires --reason"):
+        run.set_stage("P3", allow_degraded=True)
+    run = Run.load("degrev", tmp_path)
+    run.set_stage("P3", allow_degraded=True, reason="reviewing partial output on purpose")
+    st = Run.load("degrev", tmp_path).state
+    assert st["stage"] == "P3"
+    assert st["degraded_stages"][-1]["stage"] == "P3"
+    assert st["degraded_stages"][-1]["reason"] == "reviewing partial output on purpose"
+
+
+# -- native sub-agents -------------------------------------------------------
+
+def test_a_native_sub_agent_is_counted_and_reviewable(tmp_path):
+    """Paths the host dispatched itself used to be invisible.
+
+    Five runs said "five paths dispatched natively" while the ledger held zero
+    tasks: inspection reported nobody worked, and review had no file to read.
+    """
+    run = Run.init("native", "produce a report", tmp_path)
+    art = run.dir / "sub" / "writer-n" / "report.md"
+    art.parent.mkdir(parents=True)
+    art.write_text("# Report\n\n## One\n\n" + "content " * 40 + "\n\n## Two\n\n"
+                   + "content " * 40 + "\n", encoding="utf-8")
+    run.register_sub("writer-n", "done", model="some-model", artifact="sub/writer-n/report.md",
+                     note="dispatched by the host")
+    loaded = Run.load("native", tmp_path)
+    task = loaded.state["tasks"]["writer-n"]
+    assert task["channel"] == "native" and task["artifact"] == "sub/writer-n/report.md"
+    assert "1 done" in loaded.render()
+    rec = review(loaded, [("writer-n", art)], lambda role: MockProvider(quality=1.0, seed=role),
+                 default_verifiers(), [])
+    assert rec["verdict"] in ("pass", "conditional_pass", "revise")
+
+
+def test_superseded_failure_is_not_a_loose_end(tmp_path):
+    run = Run.init("sup", "produce a report", tmp_path)
+    run.update(lambda st: {**st, "tasks": {
+        "a": {"id": "a", "status": "failed", "superseded_by": "a2"},
+        "b": {"id": "b", "status": "failed"}}})
+
+    def mark(st):
+        st["reviews"] = [{"round": 1, "verdict": "revise", "issues": []}]
+        return st
+
+    run.update(mark)
+    with raises(PermissionError, match="1 path"):
+        run.set_stage("P5", force=True, reason="stop")
+
+
+# -- abandon ------------------------------------------------------------------
+
+def test_abandon_is_terminal_and_never_a_delivery(tmp_path):
+    run = Run.init("dead", "produce a report", tmp_path)
+    with raises(ValueError, match="requires --reason"):
+        run.abandon("  ")
+    run.abandon("superseded by a different approach")
+    loaded = Run.load("dead", tmp_path)
+    assert loaded.state["outcome"] == "abandoned"
+    assert loaded.state["stage"] == "P0"
+    assert loaded.derive() == "abandoned"
+
+
+
 
 class _JudgeWithUsage:
     """A judge that answers in one line, reporting exactly how few tokens it used."""
@@ -545,6 +660,27 @@ def test_inspect_accepts_a_waived_solo_run(tmp_path):
     assert inspect_run(tmp_path / "waived") == []
 
 
+def test_inspect_flags_a_waiver_that_promises_a_future_dispatch(tmp_path):
+    """"Not dispatched yet" is not a reason to skip the gate.
+
+    The waiver field is what the gate reads, so a promise written into it is
+    the gate being talked past rather than a decision on the record.
+    """
+    run = Run.init("promise", "produce a report", tmp_path)
+    run.set_stage("P2", allow_solo=True, reason="准备派子代理，先豁免数量闸")
+    codes = [f["code"] for f in inspect_run(tmp_path / "promise")]
+    assert codes == ["bogus_waiver"], codes
+
+
+def test_inspect_flags_a_stop_that_hides_failed_paths(tmp_path):
+    run = Run.init("mislabelled", "produce a report", tmp_path)
+    run.update(lambda st: {**st, "stage": "P5", "outcome": "stopped_by_user",
+                           "tasks": {"a": {"id": "a", "status": "failed"}}})
+    codes = [f["code"] for f in inspect_run(tmp_path / "mislabelled")]
+    assert codes == ["mislabeled_stop"], codes
+    assert "1 task(s) failed" in inspect_run(tmp_path / "mislabelled")[0]["detail"]
+
+
 def test_inspect_flags_a_review_bought_with_a_few_tokens(tmp_path):
     run, art = _run_with_artifact(tmp_path, "thin-inspect")
     review(run, [("w", art)], lambda role: _JudgeWithUsage(9), default_verifiers(), [])
@@ -589,6 +725,34 @@ def test_inspect_cli_exits_zero_clean_and_ten_on_findings(tmp_path):
     (broken / "state.json").write_text("{not json", encoding="utf-8")
     with redirect_stdout(stream):
         assert main(["--root", str(tmp_path), "inspect"]) == 10
+
+
+def test_cli_separates_a_refusal_from_a_wrong_record(tmp_path):
+    """Exit 1 means "not allowed yet"; exit 9 means "this needs another record".
+
+    Without the split, a caller driving the CLI cannot tell a premature close
+    from a close that has to be written as a degraded delivery.
+    """
+    Run.init("cli-kinds", "produce a report", tmp_path)
+    with redirect_stdout(io.StringIO()):
+        assert main(["--root", str(tmp_path), "stage", "--run-id", "cli-kinds",
+                     "--set", "P5", "--force", "--reason", "stop"]) == 9
+        assert main(["--root", str(tmp_path), "stage", "--run-id", "cli-kinds",
+                     "--set", "P5", "--force", "--force-kind", "degraded_delivery",
+                     "--reason", "nothing finished"]) == 0
+    st = Run.load("cli-kinds", tmp_path).state
+    assert st["outcome"] == "degraded_delivery"
+
+
+def test_cli_registers_a_native_sub_without_touching_the_cursor(tmp_path):
+    Run.init("cli-sub", "produce a report", tmp_path)
+    with redirect_stdout(io.StringIO()):
+        assert main(["--root", str(tmp_path), "sub", "--run-id", "cli-sub",
+                     "--id", "writer-n", "--status", "done",
+                     "--artifact", "sub/writer-n/report.md"]) == 0
+    st = Run.load("cli-sub", tmp_path).state
+    assert st["tasks"]["writer-n"]["channel"] == "native"
+    assert st["stage"] == "P0"
 
 
 # -- provider usage ----------------------------------------------------------

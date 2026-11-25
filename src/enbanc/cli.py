@@ -76,10 +76,12 @@ def cmd_stage(a):
     try:
         run.set_stage(a.set, force=a.force, reason=a.reason or "",
                       accept_residual=bool(getattr(a, "accept_residual", False)),
-                      allow_solo=bool(getattr(a, "allow_solo", False)))
+                      allow_solo=bool(getattr(a, "allow_solo", False)),
+                      force_kind=getattr(a, "force_kind", "user_stop") or "user_stop",
+                      allow_degraded=bool(getattr(a, "allow_degraded", False)))
     except (PermissionError, ValueError) as e:
         print(f"refused: {e}", file=sys.stderr)
-        return 1
+        return getattr(e, "code", 1)
     print(run.render())
     if run.state.get("solo_waiver"):
         w = run.state["solo_waiver"]
@@ -87,8 +89,16 @@ def cmd_stage(a):
               "— list it as a degraded path in the delivery note")
     if run.state.get("force_skip_quantity_gate"):
         print("⚠ quantity gate forced past — recorded in force_skip_quantity_gate")
+    if run.state.get("degraded_stages"):
+        d = run.state["degraded_stages"][-1]
+        print(f"⚠ entered {d.get('stage')} with no finished path: {d.get('reason')}")
     if run.state.get("outcome") == "stopped_by_user":
         print(f"⚠ delivered as stopped_by_user: {run.state.get('outcome_reason')}")
+    if run.state.get("outcome") == "degraded_delivery":
+        factors = run.state.get("outcome_degrade_factors") or []
+        print(f"⚠ delivered as degraded_delivery ({len(factors)} factor(s)): {run.state.get('outcome_reason')}")
+        for f in factors:
+            print(f"  - {f}")
     if run.state.get("outcome") == "accepted_with_residual":
         print("⚠ delivered with %d accepted finding(s) — list them in the delivery note"
               % len(run.state.get("outcome_residual") or []))
@@ -97,6 +107,33 @@ def cmd_stage(a):
         open_items = len(last.get("issues") or [])
         if open_items:
             print(f"⚠ pass with {open_items} open finding(s) — list them in the delivery note")
+    return 0
+
+
+def cmd_sub(a):
+    run = Run.load(a.run_id, _root(a))
+    try:
+        task = run.register_sub(a.id, a.status, model=a.model or "",
+                                channel=a.channel or "native",
+                                artifact=a.artifact or "", note=a.note or "",
+                                timeout=a.timeout)
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 1
+    print(f"registered {a.id}: {task.get('status')} on channel {task.get('channel')}")
+    print(Run.load(a.run_id, _root(a)).render())
+    return 0
+
+
+def cmd_abandon(a):
+    run = Run.load(a.run_id, _root(a))
+    try:
+        run.abandon(a.reason or "")
+    except ValueError as e:
+        print(f"refused: {e}", file=sys.stderr)
+        return 1
+    print(Run.load(a.run_id, _root(a)).render())
+    print("abandoned: no delivery recorded; the cursor is kept for review")
     return 0
 
 
@@ -268,9 +305,31 @@ def main(argv: list[str] | None = None) -> int:
                    help="allow delivery when the last verdict is conditional_pass")
     p.add_argument("--allow-solo", action="store_true", dest="allow_solo",
                    help="waive the two-task requirement; --reason is mandatory")
+    p.add_argument("--force-kind", choices=["user_stop", "degraded_delivery"],
+                   default="user_stop", dest="force_kind",
+                   help="how a forced close describes itself; degraded_delivery records its factors")
+    p.add_argument("--allow-degraded", action="store_true", dest="allow_degraded",
+                   help="advance into review with no finished path; --reason is mandatory")
+
+    p = add("sub", cmd_sub,
+            help="record a sub-agent the host dispatched itself; --artifact makes it reviewable")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--id", required=True)
+    p.add_argument("--status", required=True,
+                   choices=["running", "done", "degraded", "failed", "timeout", "unverified"])
+    p.add_argument("--model", default="")
+    p.add_argument("--channel", default="native")
+    p.add_argument("--artifact", default="", help="path as review reads it, e.g. sub/name/report.md")
+    p.add_argument("--note", default="")
+    p.add_argument("--timeout", type=float, default=900.0)
+
+    p = add("abandon", cmd_abandon, help="close as abandoned: terminal, not a delivery")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--reason", required=True)
 
     p = add("inspect", cmd_inspect,
-            help="read-only sweep of every run: no_state, stalled, zero_sub, thin_review, zombie")
+            help="read-only sweep of every run: no_state, stalled, zero_sub, thin_review, "
+                 "zombie, bogus_waiver, mislabeled_stop")
     p.add_argument("--stall-min", type=float, default=DEFAULT_STALL_MIN,
                    help="minutes parked at P0/P1 before a run counts as stalled")
     p.add_argument("--thin-tokens", type=int, default=DEFAULT_THIN_TOKENS,

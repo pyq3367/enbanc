@@ -5,7 +5,7 @@ display_name_en: enbanc
 description: 在用户输入 /enbanc 或合议：时，为文档、PPT、网页、报告及其他高价值产物组织多路执行、独立评审与返修。不依赖作者的模型网关、路径或凭据。
 description_zh: 为需要认真核对的交付物安排独立评审，保留证据与返修记录。
 description_en: Coordinate production, independent review, and revision for high-value work using the host's available models and tools.
-version: 0.2.2
+version: 0.2.3
 author: enbanc contributors
 agent_created: true
 ---
@@ -109,6 +109,8 @@ agent_created: true
 ## P5 — 交付
 
 仅在约定标准已核验、阻塞问题已闭合且有独立评审记录时标“通过”。末轮为 `conditional_pass` 时，交付需要用户显式接受残留，并记录 `outcome=accepted_with_residual` 与残留清单；不接受就继续修。用户决定停止或接受未完成版本时，显著写明未通过项及停止原因，不能混作正常完成。
+
+停止要分两种记录：运行本身没掉链子、只是用户叫停，用 `--force --reason`，记 `outcome=stopped_by_user`；执行链自己没交付而仍要交，用 `--force --force-kind degraded_delivery --reason`，记 `outcome=degraded_delivery` 并把失败路、未核验路、缺评审、缺产物逐条写进 `outcome_degrade_factors`。前者要求没有失败路、有评审、有产物，否则拒绝并以退出码 9 指向后者。仍有任务在运行时，任何强制收口都不放行，先收集。进入评审阶段时任务一条未完成会被拒绝，确要审半成品用 `--allow-degraded --reason`。宿主工具自己派出的子代理要用 `enbanc sub` 登记，否则既不在计数里也没有产物可审；决定不再继续的 run 用 `enbanc abandon --reason` 收成终态。
 
 交付摘要包含文件位置、做了什么、验证方式、仍未验证的内容、评审与返修情况、同模型或工具降级情况。路径用项目相对路径，除非用户为本地访问明确需要绝对路径。只呈现本次交付物，不公开私人运行日志。
 

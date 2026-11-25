@@ -53,7 +53,31 @@ enbanc --root runs inspect
 |---|---|---|
 | `pass` | 可以 | 无未闭合项 |
 | `conditional_pass` | 需显式接受 | 加 `--accept-residual` 才放行，记录 `outcome=accepted_with_residual` 与残留项清单 |
-| `revise` | 不可以 | 先处理实际问题；确要停止则 `--force --reason "..."`，记为 `outcome=stopped_by_user` |
+| `revise` | 不可以 | 先处理实际问题；确要停止则按下方两种停止方式之一记录 |
+
+停止有两种，记录不同，不能互相借用：
+
+| 情况 | 命令 | 记录 |
+|---|---|---|
+| 用户叫停，运行本身没掉链子 | `--force --reason "..."` | `outcome=stopped_by_user` |
+| 执行链没交付，仍要交 | `--force --force-kind degraded_delivery --reason "..."` | `outcome=degraded_delivery` + `outcome_degrade_factors` |
+
+第一种要求没有失败路、至少有一轮评审、有产物，否则拒绝并以退出码 9 提示改用第二种。仍有任务标着运行中时，两种都拒绝：先 `collect`，再决定。
+
+进入 `P3`/`P4` 时，任务已登记但一条都没完成会被拒绝。确要拿半成品去审，用 `--allow-degraded --reason` 推进，理由写入 `degraded_stages`。
+
+宿主工具自己派出的子代理不在 `dispatch` 的记录里，用下面这条补登记，`--artifact` 指向的路径会成为评审输入：
+
+```bash
+enbanc --root runs sub --run-id r1 --id writer-n --status done \
+  --artifact sub/writer-n/analysis.md --model "<模型名>" --channel native
+```
+
+决定不再继续的 run 走终态，不要用强制交付假装收尾：
+
+```bash
+enbanc --root runs abandon --run-id r1 --reason "换了方案，本次不再继续"
+```
 
 `conditional_pass` 不是一个可以忽略的中间态。它的意思是「可以交，但还有问题」，所以必须由人说过「这些我接受」，而不是让报告直接写「已通过」。
 
